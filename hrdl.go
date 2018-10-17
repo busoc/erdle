@@ -3,8 +3,8 @@ package erdle
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"encoding/binary"
+	"fmt"
 	"hash"
 	"io"
 	"time"
@@ -41,14 +41,10 @@ func DecodeHRDL(r io.Reader) (*Erdle, error) {
 	xs := make([]byte, 8<<20)
 
 	n, err := r.Read(xs)
-	switch {
-	case err != nil && !IsErdleError(err):
+	if err != nil {
 		return nil, err
-	case err != nil && IsErdleError(err):
-		return nil, ErrSkip
-	default:
-		r = bytes.NewReader(xs[:n])
 	}
+	r = bytes.NewReader(xs[:n])
 
 	var h HRDLHeader
 	binary.Read(r, binary.BigEndian, &h.Sync)

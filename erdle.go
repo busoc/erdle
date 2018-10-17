@@ -1,8 +1,8 @@
 package erdle
 
 import (
-	"fmt"
 	"errors"
+	"fmt"
 )
 
 var ErrSkip = errors.New("skip")

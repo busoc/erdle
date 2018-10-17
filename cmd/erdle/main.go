@@ -176,15 +176,18 @@ func dumpHRDL(r io.Reader, hrdfe bool) error {
 	r = erdle.Reassemble(r, hrdfe)
 	for i := 1; ; i++ {
 		e, err := erdle.DecodeHRDL(r)
-		if err == io.EOF {
+		switch {
+		case err == io.EOF:
 			return nil
-		}
-		if err == erdle.ErrSkip {
+		case err != nil && erdle.IsErdleError(err):
+			log.Println(err)
 			continue
-		}
-		if e == nil {
+		case err != nil && !erdle.IsErdleError(err):
 			return err
 		}
+		// if e == nil {
+		// 	return err
+		// }
 		h := e.HRDLHeader
 		at := GPS.Add(h.Acqtime).Format("2006-01-02 15:04:05.000")
 		xt := GPS.Add(h.Auxtime).Format("15:04:05.000")
@@ -227,8 +230,8 @@ func runRelay(cmd *cli.Command, args []string) error {
 		return err
 	}
 	for bs := range queue {
-		if _, err := c.Write(bs); err != nil {
-			log.Println(err)
+		if n, err := c.Write(bs); err != nil {
+			log.Printf("%s: write %d/%d bytes", err, n, len(bs))
 		}
 	}
 	return nil
