@@ -42,8 +42,9 @@ func runReplay(cmd *cli.Command, args []string) error {
 	}
 	r := erdle.NewReader(io.MultiReader(rs...), *hrdfe)
 
-	_, err = io.CopyBuffer(w, r, make([]byte, 1024))
-	return err
+	vs := make([]byte, 1024)
+	_, err = io.CopyBuffer(w, r, vs)
+	return nil
 }
 
 func Replay(addr string, z cli.Size) (net.Conn, error) {

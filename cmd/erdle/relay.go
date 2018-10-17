@@ -20,7 +20,7 @@ type relayFunc func(string, string, int, bool) error
 
 func runRelay(cmd *cli.Command, args []string) error {
 	rate, _ := cli.ParseSize("32m")
-	size := cmd.Flag.Uint("s", 1000, "queue size")
+	size := cmd.Flag.Uint("s", 64, "queue size")
 	keep := cmd.Flag.Bool("k", false, "keep invalid")
 	cmd.Flag.Var(&rate, "r", "bandwidth")
 	if err := cmd.Flag.Parse(args); err != nil {
@@ -65,10 +65,8 @@ func relayTCP(local, remote string, size int, keep bool) error {
 			if err != nil {
 				return
 			}
-			for bs := range queue {
-				if n, err := w.Write(bs); err != nil {
-					log.Printf("%s: write %d/%d bytes", err, n, len(bs))
-				}
+			if err := relayConn(w, queue); err != nil {
+				log.Println(err)
 			}
 		}(r, w)
 	}
@@ -94,9 +92,18 @@ func relayUDP(local, remote string, size int, keep bool) error {
 	if err != nil {
 		return err
 	}
+	return relayConn(c, queue)
+}
+
+func relayConn(c net.Conn, queue <-chan []byte) error {
 	for bs := range queue {
 		if n, err := c.Write(bs); err != nil {
+			if err, ok := err.(net.Error); ok && !err.Temporary() {
+				return err
+			}
 			log.Printf("%s: write %d/%d bytes", err, n, len(bs))
+		} else {
+			log.Printf("packet %d bytes written to %s", n, c.RemoteAddr())
 		}
 	}
 	return nil
@@ -109,7 +116,7 @@ func reassemble(r io.Reader, size int, keep bool) (<-chan []byte, error) {
 		rs := erdle.Reassemble(r, false)
 
 		var dropped uint64
-		for {
+		for i := 1; ; i++ {
 			xs := make([]byte, 8<<20)
 			switch n, err := rs.Read(xs); err {
 			case nil:
@@ -127,6 +134,7 @@ func reassemble(r io.Reader, size int, keep bool) (<-chan []byte, error) {
 			}
 			select {
 			case q <- xs:
+				log.Printf("packet %d sent (%d bytes)", i, len(xs))
 			default:
 				dropped++
 				log.Printf("packet %d dropped (%d bytes)", dropped, len(xs))
