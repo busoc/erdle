@@ -1,10 +1,10 @@
 package erdle
 
 import (
-	"bufio"
+	// "bufio"
 	"bytes"
-	"encoding/binary"
 	"fmt"
+	"encoding/binary"
 	"hash"
 	"io"
 	"time"
@@ -125,7 +125,8 @@ func readTime6(coarse uint32, fine uint16) time.Time {
 const defaultOffset = caduBodyLen + 4
 
 type assembler struct {
-	inner  *bufio.Reader
+	// queue  <-chan []byte
+	inner  io.Reader
 	rest   *bytes.Buffer
 	skip   int
 	digest hash.Hash32
@@ -133,7 +134,8 @@ type assembler struct {
 
 func Reassemble(r io.Reader, hrdfe bool) io.Reader {
 	rs := &assembler{
-		inner:  bufio.NewReaderSize(r, 1<<20),
+		// queue:  readCadus(NewReader(r, hrdfe)),
+		inner:  NewReader(r, hrdfe),
 		rest:   new(bytes.Buffer),
 		digest: SumHRDL(),
 	}
@@ -217,11 +219,31 @@ func (r *assembler) copyHRDL(xs, bs []byte) (int, error) {
 }
 
 func (r *assembler) readCadu() ([]byte, error) {
-	vs := make([]byte, caduPacketLen+r.skip)
+	// bs, ok := <-r.queue
+	// if !ok {
+	// 	return nil, io.EOF
+	// }
+	// return bs, nil
+	vs := make([]byte, caduPacketLen)
 	if _, err := io.ReadFull(r.inner, vs); err != nil {
 		return nil, err
 	}
-	return vs[r.skip+caduHeaderLen : r.skip+caduPacketLen-caduCheckLen], nil
+	return vs, nil
+}
+
+func readCadus(r io.Reader) <-chan []byte {
+	q := make(chan []byte, 1000)
+	go func() {
+		defer close(q)
+		for {
+			vs := make([]byte, caduPacketLen)
+			if _, err := io.ReadFull(r, vs); err != nil {
+				return
+			}
+			q <- vs
+		}
+	}()
+	return q
 }
 
 type hrdlSum struct {

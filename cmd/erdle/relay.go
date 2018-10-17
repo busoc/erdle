@@ -1,29 +1,32 @@
 package main
 
 import (
-	"fmt"
-	"io"
-	"log"
-	"net"
+  "fmt"
+  "net"
+  "io"
+  "log"
 
-	"github.com/busoc/erdle"
-	"github.com/midbel/cli"
+  "github.com/busoc/erdle"
+  "github.com/midbel/cli"
 )
 
-var relayCommand = &cli.Command{
+var relayCommand = &cli.Command {
 	Usage: "relay <local> <remote>",
 	Short: "",
 	Run:   runRelay,
 }
 
+type relayFunc func(string, string, int, bool) error
+
 func runRelay(cmd *cli.Command, args []string) error {
 	rate, _ := cli.ParseSize("32m")
 	size := cmd.Flag.Uint("s", 1000, "queue size")
+  keep := cmd.Flag.Bool("k", false, "keep invalid")
 	cmd.Flag.Var(&rate, "r", "bandwidth")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	var relay func(string, string, int) error
+	var relay relayFunc
 	proto, addr := protoFromAddr(cmd.Flag.Arg(0))
 	switch proto {
 	case "udp":
@@ -34,10 +37,10 @@ func runRelay(cmd *cli.Command, args []string) error {
 		return fmt.Errorf("unsupported protocol %s", proto)
 	}
 
-	return relay(addr, cmd.Flag.Arg(1), int(*size))
+	return relay(addr, cmd.Flag.Arg(1), int(*size), *keep)
 }
 
-func relayTCP(local, remote string, size int) error {
+func relayTCP(local, remote string, size int, keep bool) error {
 	c, err := net.Listen("tcp", local)
 	if err != nil {
 		return err
@@ -58,7 +61,7 @@ func relayTCP(local, remote string, size int) error {
 				r.Close()
 				w.Close()
 			}()
-			queue, err := reassemble(r, size)
+			queue, err := reassemble(r, size, keep)
 			if err != nil {
 				return
 			}
@@ -71,7 +74,7 @@ func relayTCP(local, remote string, size int) error {
 	}
 }
 
-func relayUDP(local, remote string, size int) error {
+func relayUDP(local, remote string, size int, keep bool) error {
 	c, err := net.Dial(protoFromAddr(remote))
 	if err != nil {
 		return err
@@ -87,7 +90,7 @@ func relayUDP(local, remote string, size int) error {
 		return err
 	}
 	defer c.Close()
-	queue, err := reassemble(r, int(size))
+	queue, err := reassemble(r, int(size), keep)
 	if err != nil {
 		return err
 	}
@@ -99,7 +102,7 @@ func relayUDP(local, remote string, size int) error {
 	return nil
 }
 
-func reassemble(r io.Reader, size int) (<-chan []byte, error) {
+func reassemble(r io.Reader, size int, keep bool) (<-chan []byte, error) {
 	q := make(chan []byte, size)
 	go func() {
 		defer close(q)
@@ -117,8 +120,10 @@ func reassemble(r io.Reader, size int) (<-chan []byte, error) {
 				if !erdle.IsErdleError(err) {
 					return
 				}
-				log.Println(err)
-				continue
+				log.Printf("skip packet (%d bytes): %s", n, err)
+        if !keep {
+          continue
+        }
 			}
 			select {
 			case q <- xs:

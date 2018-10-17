@@ -48,6 +48,9 @@ func runReplay(cmd *cli.Command, args []string) error {
 
 func Replay(addr string, z cli.Size) (net.Conn, error) {
 	c, err := net.Dial(protoFromAddr(addr))
+	if err != nil {
+		return nil, err
+	}
 	if z == 0 {
 		return c, err
 	}
