@@ -1,16 +1,16 @@
 package main
 
 import (
-  "fmt"
-  "net"
-  "io"
-  "log"
+	"fmt"
+	"io"
+	"log"
+	"net"
 
-  "github.com/busoc/erdle"
-  "github.com/midbel/cli"
+	"github.com/busoc/erdle"
+	"github.com/midbel/cli"
 )
 
-var relayCommand = &cli.Command {
+var relayCommand = &cli.Command{
 	Usage: "relay <local> <remote>",
 	Short: "",
 	Run:   runRelay,
@@ -21,7 +21,7 @@ type relayFunc func(string, string, int, bool) error
 func runRelay(cmd *cli.Command, args []string) error {
 	rate, _ := cli.ParseSize("32m")
 	size := cmd.Flag.Uint("s", 1000, "queue size")
-  keep := cmd.Flag.Bool("k", false, "keep invalid")
+	keep := cmd.Flag.Bool("k", false, "keep invalid")
 	cmd.Flag.Var(&rate, "r", "bandwidth")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
@@ -121,9 +121,9 @@ func reassemble(r io.Reader, size int, keep bool) (<-chan []byte, error) {
 					return
 				}
 				log.Printf("skip packet (%d bytes): %s", n, err)
-        if !keep {
-          continue
-        }
+				if !keep {
+					continue
+				}
 			}
 			select {
 			case q <- xs:
