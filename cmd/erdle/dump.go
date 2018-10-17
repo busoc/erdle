@@ -18,6 +18,8 @@ var dumpCommand = &cli.Command{
 	Run:   runDump,
 }
 
+type dumpFunc func(io.Reader, bool) error
+
 func runDump(cmd *cli.Command, args []string) error {
 	proto := cmd.Flag.String("p", "", "protocol")
 	hrdfe := cmd.Flag.Bool("e", false, "hrdfe")
@@ -25,44 +27,77 @@ func runDump(cmd *cli.Command, args []string) error {
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	var r io.Reader
+
+	var dump dumpFunc
+	switch *kind {
+	case "", "hrdl":
+		dump = dumpHRDL
+	case "vcdu", "cadu":
+		dump = dumpVCDU
+	default:
+		return fmt.Errorf("unsupported packet type %s", *kind)
+	}
 	switch strings.ToLower(*proto) {
 	case "", "file":
-		var rs []io.Reader
-		for _, p := range cmd.Flag.Args() {
-			r, err := os.Open(p)
-			if err != nil {
-				return err
-			}
-			defer r.Close()
-			rs = append(rs, r)
-		}
-		r = io.MultiReader(rs...)
+		return dumpFile(cmd.Flag.Args(), *hrdfe, dump)
 	case "udp":
-		a, err := net.ResolveUDPAddr("udp", cmd.Flag.Arg(0))
-		if err != nil {
-			return err
-		}
-		c, err := net.ListenUDP("udp", a)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-
-		r = c
+		return dumpUDP(cmd.Flag.Arg(0), *hrdfe, dump)
+	case "tcp":
+		return dumpTCP(cmd.Flag.Arg(0), *hrdfe, dump)
 	default:
 		return fmt.Errorf("unsupported protocol %s", *proto)
 	}
-	var err error
-	switch *kind {
-	case "", "hrdl":
-		err = dumpHRDL(r, *hrdfe)
-	case "vcdu", "cadu":
-		err = dumpVCDU(r, *hrdfe)
-	default:
-		err = fmt.Errorf("unsupported packet type %s", *kind)
+}
+
+func dumpFile(ps []string, hrdfe bool, dump dumpFunc) error {
+	var rs []io.Reader
+	for _, p := range ps {
+		r, err := os.Open(p)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		rs = append(rs, r)
 	}
-	return err
+	return dump(io.MultiReader(rs...), hrdfe)
+}
+
+func dumpUDP(a string, hrdfe bool, dump dumpFunc) error {
+	addr, err := net.ResolveUDPAddr("udp", a)
+	if err != nil {
+		return err
+	}
+	var c net.Conn
+	if addr.IP.IsMulticast() {
+		c, err = net.ListenMulticastUDP("udp", nil, addr)
+	} else {
+		c, err = net.ListenUDP("udp", addr)
+	}
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	return dump(c, hrdfe)
+}
+
+func dumpTCP(a string, hrdfe bool, dump dumpFunc) error {
+	c, err := net.Listen("tcp", a)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for {
+		r, err := c.Accept()
+		if err != nil {
+			return err
+		}
+		go func(r net.Conn) {
+			defer r.Close()
+			dump(r, hrdfe)
+		}(r)
+	}
+	return nil
 }
 
 func dumpVCDU(r io.Reader, hrdfe bool) error {
