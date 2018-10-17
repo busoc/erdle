@@ -179,6 +179,9 @@ func dumpHRDL(r io.Reader, hrdfe bool) error {
 		if err == io.EOF {
 			return nil
 		}
+		if err == erdle.ErrSkip {
+			continue
+		}
 		if e == nil {
 			return err
 		}
@@ -207,12 +210,13 @@ func dumpHRDL(r io.Reader, hrdfe bool) error {
 
 func runRelay(cmd *cli.Command, args []string) error {
 	rate, _ := cli.ParseSize("32m")
+	proto := cmd.Flag.String("p", "udp", "protocol")
 	size := cmd.Flag.Uint("s", 1000, "queue size")
 	cmd.Flag.Var(&rate, "r", "bandwidth")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	c, err := net.Dial("tcp", cmd.Flag.Arg(1))
+	c, err := net.Dial(*proto, cmd.Flag.Arg(1))
 	if err != nil {
 		return err
 	}
@@ -256,6 +260,9 @@ func reassemble(addr string, size int) (<-chan []byte, error) {
 			case io.EOF:
 				return
 			default:
+				if !erdle.IsErdleError(err) {
+					return
+				}
 				log.Println(err)
 				continue
 			}

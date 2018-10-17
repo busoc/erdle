@@ -3,6 +3,7 @@ package erdle
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"encoding/binary"
 	"hash"
 	"io"
@@ -37,28 +38,32 @@ type Erdle struct {
 }
 
 func DecodeHRDL(r io.Reader) (*Erdle, error) {
+	xs := make([]byte, 8<<20)
+
+	n, err := r.Read(xs)
+	switch {
+	case err != nil && !IsErdleError(err):
+		return nil, err
+	case err != nil && IsErdleError(err):
+		return nil, ErrSkip
+	default:
+		r = bytes.NewReader(xs[:n])
+	}
+
+	var h HRDLHeader
+	binary.Read(r, binary.BigEndian, &h.Sync)
+	binary.Read(r, binary.LittleEndian, &h.Size)
+
+	bs := make([]byte, h.Size+4)
+	if _, err := io.ReadFull(r, bs); err != nil {
+		return nil, err
+	}
+
 	var (
 		spare  uint16
 		fine   uint16
 		coarse uint32
 	)
-
-	var h HRDLHeader
-
-	xs := make([]byte, 8<<20)
-	n, err := r.Read(xs)
-	if err != nil && !IsErdleError(err) {
-		return nil, err
-	}
-	r = bytes.NewReader(xs[:n])
-
-	binary.Read(r, binary.BigEndian, &h.Sync)
-	binary.Read(r, binary.LittleEndian, &h.Size)
-
-	bs := make([]byte, h.Size)
-	if _, err := io.ReadFull(r, bs); err != nil {
-		return nil, err
-	}
 	rs := bytes.NewReader(bs)
 	binary.Read(rs, binary.LittleEndian, &h.Channel)
 	binary.Read(rs, binary.LittleEndian, &h.Source)
@@ -82,6 +87,7 @@ func DecodeHRDL(r io.Reader) (*Erdle, error) {
 		h.UPI = "SCIENCE"
 		bs := make([]byte, 32)
 		if _, err := rs.Read(bs); err != nil {
+			fmt.Println("oups something wrong happens science")
 			return nil, err
 		}
 		if u := string(bytes.Trim(bs, "\x00")); len(u) > 0 {
@@ -91,6 +97,7 @@ func DecodeHRDL(r io.Reader) (*Erdle, error) {
 		h.UPI = "IMAGE"
 		bs := make([]byte, 52)
 		if _, err := rs.Read(bs); err != nil {
+			fmt.Println("oups something wrong happens here - image")
 			return nil, err
 		}
 		if u := string(bytes.Trim(bs[20:], "\x00")); len(u) > 0 {
