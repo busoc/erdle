@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -90,105 +89,91 @@ func main() {
 }
 
 func runDump(cmd *cli.Command, args []string) error {
+	proto := cmd.Flag.String("p", "", "protocol")
 	hrdfe := cmd.Flag.Bool("e", false, "hrdfe")
 	kind := cmd.Flag.String("k", "", "dump packet type")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
+	var r io.Reader
+	switch strings.ToLower(*proto) {
+	case "", "file":
+		var rs []io.Reader
+		for _, p := range cmd.Flag.Args() {
+			r, err := os.Open(p)
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+			rs = append(rs, r)
+		}
+		r = io.MultiReader(rs...)
+	case "udp":
+		a, err := net.ResolveUDPAddr("udp", cmd.Flag.Arg(0))
+		if err != nil {
+			return err
+		}
+		c, err := net.ListenUDP("udp", a)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		r = c
+	default:
+		return fmt.Errorf("unsupported protocol %s", *proto)
+	}
 	var err error
 	switch *kind {
 	case "", "hrdl":
-		err = dumpHRDL(cmd.Flag.Args(), *hrdfe)
+		err = dumpHRDL(r, *hrdfe)
 	case "vcdu", "cadu":
-		err = dumpVCDU(cmd.Flag.Args(), *hrdfe)
+		err = dumpVCDU(r, *hrdfe)
 	default:
 		err = fmt.Errorf("unsupported packet type %s", *kind)
 	}
 	return err
 }
 
-func dumpVCDU(ps []string, hrdfe bool) error {
-	const row = "%8d | %s | %12s | %18s | %04x | %-3d | %-3d | %-3d | %-12d | %6t | %04x | %04x | %04x | %4d | %s"
+func dumpVCDU(r io.Reader, hrdfe bool) error {
+	const row = "%8d | %04x | %-3d | %-3d | %-3d | %-12d | %6t | %04x | %04x | %04x | %4d | %s"
 	var (
 		prev      *erdle.Cadu
 		count     int
 		corrupted int
 		missing   int
-		total     time.Duration
 	)
 	logger := log.New(os.Stdout, "", 0)
-	for c := range decodeVCDUFromFiles(ps, hrdfe) {
-		delta, elapsed := c.Missing(prev), c.Elapsed(prev)
-		total += elapsed
-		err := "-"
+
+	r = erdle.NewReader(r, hrdfe)
+	for {
+		c, err := erdle.DecodeCadu(r)
+		if err != nil {
+			return err
+		}
+		delta := c.Missing(prev)
+
+		msg := "-"
 		if c.Error != nil {
-			err = c.Error.Error()
+			msg = c.Error.Error()
 			corrupted++
 		}
 		missing += int(delta)
 		count++
 
 		h := c.VCDUHeader
-		rx := c.Reception.Format("2006-01-02 15:05:04.000")
-		logger.Printf(row, count, rx, elapsed, total, h.Word, h.Version, h.Space, h.Channel, h.Sequence, h.Replay, h.Control, h.Data, c.Control, delta, err)
+		logger.Printf(row, count, h.Word, h.Version, h.Space, h.Channel, h.Sequence, h.Replay, h.Control, h.Data, c.Control, delta, msg)
 		prev = c
 	}
-	logger.Printf("%d cadus found (%d missing, %d corrupted - total time %s)", count, missing, corrupted, total)
+	logger.Printf("%d cadus found (%d missing, %d corrupted)", count, missing, corrupted)
 	return nil
 }
 
-func decodeVCDUFromFiles(ps []string, hrdfe bool) <-chan *erdle.Cadu {
-	q := make(chan *erdle.Cadu, 100)
-	go func() {
-		defer close(q)
-		var rs []io.Reader
-		for _, p := range ps {
-			r, err := os.Open(p)
-			if err != nil {
-				return
-			}
-			defer r.Close()
-			rs = append(rs, r)
-		}
-		r := io.MultiReader(rs...)
-		for {
-			n := time.Now()
-			if hrdfe {
-				var (
-					coarse uint32
-					fine   uint32
-				)
-				binary.Read(r, binary.LittleEndian, &coarse)
-				binary.Read(r, binary.LittleEndian, &fine)
-
-				n = time.Unix(int64(coarse), int64(fine)*1000).Add(Delta)
-			}
-			c, err := erdle.DecodeCadu(r)
-			if err != nil {
-				break
-			}
-			c.Reception = n
-			q <- c
-		}
-	}()
-	return q
-}
-
-func dumpHRDL(ps []string, hrdfe bool) error {
+func dumpHRDL(r io.Reader, hrdfe bool) error {
 	const row = "%6d | %7d | %02x | %s | %9d | %s | %s | %02x | %s | %7d | %16s | %s"
-	var rs []io.Reader
 
 	logger := log.New(os.Stdout, "", 0)
-	for _, a := range ps {
-		r, err := os.Open(a)
-		if err != nil {
-			return err
-		}
-		defer r.Close()
-		rs = append(rs, r)
-	}
-
-	r := erdle.Reassemble(io.MultiReader(rs...), hrdfe)
+	r = erdle.Reassemble(r, hrdfe)
 	for i := 1; ; i++ {
 		e, err := erdle.DecodeHRDL(r)
 		if err == io.EOF {
@@ -320,7 +305,7 @@ func Replay(addr string, z cli.Size) (net.Conn, error) {
 		return c, err
 	}
 	return &replay{
-		Conn: c,
+		Conn:    c,
 		limiter: rate.NewLimiter(rate.Limit(z.Float()), int(z.Int())/10),
 	}, nil
 }

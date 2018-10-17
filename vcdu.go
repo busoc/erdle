@@ -1,6 +1,7 @@
 package erdle
 
 import (
+	"bytes"
 	"encoding/binary"
 	"hash"
 	"io"
@@ -52,7 +53,7 @@ func NewReader(r io.Reader, hrdfe bool) io.Reader {
 }
 
 func (r *reader) Read(bs []byte) (int, error) {
-	vs := make([]byte, caduPacketLen + r.skip)
+	vs := make([]byte, caduPacketLen+r.skip)
 	if n, err := io.ReadFull(r.inner, vs); err != nil {
 		return n, err
 	}
@@ -63,7 +64,13 @@ func (r *reader) Read(bs []byte) (int, error) {
 	return n, nil
 }
 
-func DecodeVCDU(r io.Reader) (*Cadu, error) {
+func DecodeCadu(r io.Reader) (*Cadu, error) {
+	bs := make([]byte, caduPacketLen)
+	if _, err := io.ReadFull(r, bs); err != nil {
+		return nil, err
+	}
+	r = bytes.NewReader(bs)
+
 	var (
 		h   VCDUHeader
 		pid uint16
@@ -164,44 +171,4 @@ func (v *vcduSum) Write(bs []byte) (int, error) {
 		}
 	}
 	return len(bs), nil
-}
-
-func DecodeCadu(r io.Reader) (*Cadu, error) {
-	var (
-		h   VCDUHeader
-		pid uint16
-		seq uint32
-	)
-	if err := binary.Read(r, binary.BigEndian, &h.Word); err != nil {
-		return nil, err
-	}
-
-	sum := SumVCDU()
-	rs := io.TeeReader(r, sum)
-
-	binary.Read(rs, binary.BigEndian, &pid)
-	h.Version = uint8((pid & 0xC000) >> 14)
-	h.Space = uint8((pid & 0x3FC0) >> 6)
-	h.Channel = uint8(pid & 0x003F)
-
-	binary.Read(rs, binary.BigEndian, &seq)
-	h.Sequence = seq >> 8
-	h.Replay = (seq >> 7) == 1
-
-	binary.Read(rs, binary.BigEndian, &h.Control)
-	binary.Read(rs, binary.BigEndian, &h.Data)
-
-	c := Cadu{
-		VCDUHeader: &h,
-		Payload:    make([]byte, caduBodyLen),
-	}
-	if _, err := io.ReadFull(rs, c.Payload); err != nil {
-		return nil, err
-	}
-	binary.Read(r, binary.BigEndian, &c.Control)
-	if s := sum.Sum32(); s != uint32(c.Control) {
-		c.Error = ChecksumError{Want: uint32(c.Control), Got: s}
-	}
-
-	return &c, nil
 }
