@@ -38,6 +38,31 @@ type Cadu struct {
 	Error     error
 }
 
+type reader struct {
+	inner io.Reader
+	skip  int
+}
+
+func NewReader(r io.Reader, hrdfe bool) io.Reader {
+	var skip int
+	if hrdfe {
+		skip = 8
+	}
+	return &reader{r, skip}
+}
+
+func (r *reader) Read(bs []byte) (int, error) {
+	vs := make([]byte, caduPacketLen + r.skip)
+	if n, err := io.ReadFull(r.inner, vs); err != nil {
+		return n, err
+	}
+	n := copy(bs, vs[r.skip:])
+	if n < caduPacketLen {
+		return n, io.ErrShortBuffer
+	}
+	return n, nil
+}
+
 func DecodeVCDU(r io.Reader) (*Cadu, error) {
 	var (
 		h   VCDUHeader

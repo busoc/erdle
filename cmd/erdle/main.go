@@ -15,6 +15,7 @@ import (
 
 	"github.com/busoc/erdle"
 	"github.com/midbel/cli"
+	"golang.org/x/time/rate"
 )
 
 var (
@@ -60,11 +61,11 @@ Use {{.Name}} [command] -h for more information about its usage.
 `
 
 func main() {
-	// defer func() {
-	// 	if err := recover(); err != nil {
-	// 		log.Fatalf("unexpected error: %s", err)
-	// 	}
-	// }()
+	defer func() {
+		if err := recover(); err != nil {
+			log.Fatalf("unexpected error: %s", err)
+		}
+	}()
 	sort.Slice(commands, func(i, j int) bool { return commands[i].String() < commands[j].String() })
 	usage := func() {
 		data := struct {
@@ -181,7 +182,7 @@ func dumpHRDL(ps []string, hrdfe bool) error {
 	for _, a := range ps {
 		r, err := os.Open(a)
 		if err != nil {
-			log.Println(err)
+			return err
 		}
 		defer r.Close()
 		rs = append(rs, r)
@@ -285,7 +286,58 @@ func reassemble(addr string, size int) (<-chan []byte, error) {
 }
 
 func runReplay(cmd *cli.Command, args []string) error {
-	return cmd.Flag.Parse(args)
+	rate, _ := cli.ParseSize("32m")
+	cmd.Flag.Var(&rate, "r", "bandwidth usage")
+	hrdfe := cmd.Flag.Bool("e", false, "hrdfe")
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	w, err := Replay(cmd.Flag.Arg(0), rate)
+	if err != nil {
+		return err
+	}
+	defer w.Close()
+
+	var rs []io.Reader
+	for i := 1; i < cmd.Flag.NArg(); i++ {
+		r, err := os.Open(cmd.Flag.Arg(i))
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+
+		rs = append(rs, r)
+	}
+	r := erdle.NewReader(io.MultiReader(rs...), *hrdfe)
+
+	_, err = io.CopyBuffer(w, r, make([]byte, 1024))
+	return err
+}
+
+func Replay(addr string, z cli.Size) (net.Conn, error) {
+	c, err := net.Dial("udp", addr)
+	if z == 0 {
+		return c, err
+	}
+	return &replay{
+		Conn: c,
+		limiter: rate.NewLimiter(rate.Limit(z.Float()), int(z.Int())/10),
+	}, nil
+}
+
+type replay struct {
+	net.Conn
+	limiter *rate.Limiter
+}
+
+func (r *replay) Write(bs []byte) (int, error) {
+	v := r.limiter.ReserveN(time.Now(), len(bs))
+	if !v.OK() {
+		return 0, nil
+	}
+	time.Sleep(v.Delay())
+
+	return r.Conn.Write(bs)
 }
 
 func runCount(cmd *cli.Command, args []string) error {
