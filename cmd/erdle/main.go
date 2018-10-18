@@ -20,14 +20,10 @@ var (
 )
 
 var commands = []*cli.Command{
-	{
-		Usage: "count [-p] [-k] <source,...>",
-		Short: "",
-		Run:   runCount,
-	},
 	dumpCommand,
 	relayCommand,
 	replayCommand,
+	countCommand,
 }
 
 const helpText = `{{.Name}} reports various information about vcdu and/or hrdl packets
@@ -44,11 +40,11 @@ Use {{.Name}} [command] -h for more information about its usage.
 `
 
 func main() {
-	defer func() {
-		if err := recover(); err != nil {
-			log.Fatalf("unexpected error: %s", err)
-		}
-	}()
+	// defer func() {
+	// 	if err := recover(); err != nil {
+	// 		log.Fatalf("unexpected error: %s", err)
+	// 	}
+	// }()
 	sort.Slice(commands, func(i, j int) bool { return commands[i].String() < commands[j].String() })
 	usage := func() {
 		data := struct {
@@ -78,8 +74,4 @@ func protoFromAddr(a string) (string, string) {
 		return "tcp", a
 	}
 	return strings.ToLower(u.Scheme), u.Host
-}
-
-func runCount(cmd *cli.Command, args []string) error {
-	return cmd.Flag.Parse(args)
 }

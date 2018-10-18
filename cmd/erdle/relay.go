@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -8,6 +10,7 @@ import (
 
 	"github.com/busoc/erdle"
 	"github.com/midbel/cli"
+	"github.com/midbel/rustine/sum"
 )
 
 var relayCommand = &cli.Command{
@@ -16,10 +19,11 @@ var relayCommand = &cli.Command{
 	Run:   runRelay,
 }
 
-type relayFunc func(string, string, int, bool) error
+type relayFunc func(string, string, int, int, bool) error
 
 func runRelay(cmd *cli.Command, args []string) error {
 	rate, _ := cli.ParseSize("32m")
+	mode := cmd.Flag.Int("i", -1, "instance")
 	size := cmd.Flag.Uint("s", 64, "queue size")
 	keep := cmd.Flag.Bool("k", false, "keep invalid")
 	cmd.Flag.Var(&rate, "r", "bandwidth")
@@ -36,11 +40,16 @@ func runRelay(cmd *cli.Command, args []string) error {
 	default:
 		return fmt.Errorf("unsupported protocol %s", proto)
 	}
+	switch *mode {
+	case -1, 0, 1, 2, 255:
+	default:
+		return fmt.Errorf("unsupported instance")
+	}
 
-	return relay(addr, cmd.Flag.Arg(1), int(*size), *keep)
+	return relay(addr, cmd.Flag.Arg(1), *mode, int(*size), *keep)
 }
 
-func relayTCP(local, remote string, size int, keep bool) error {
+func relayTCP(local, remote string, mode, size int, keep bool) error {
 	c, err := net.Listen("tcp", local)
 	if err != nil {
 		return err
@@ -65,14 +74,14 @@ func relayTCP(local, remote string, size int, keep bool) error {
 			if err != nil {
 				return
 			}
-			if err := relayConn(w, queue); err != nil {
+			if err := relayHadock(w, queue, mode); err != nil {
 				log.Println(err)
 			}
 		}(r, w)
 	}
 }
 
-func relayUDP(local, remote string, size int, keep bool) error {
+func relayUDP(local, remote string, mode, size int, keep bool) error {
 	c, err := net.Dial(protoFromAddr(remote))
 	if err != nil {
 		return err
@@ -92,7 +101,41 @@ func relayUDP(local, remote string, size int, keep bool) error {
 	if err != nil {
 		return err
 	}
-	return relayConn(c, queue)
+	return relayHadock(c, queue, mode)
+}
+
+const (
+	hdkVersion = 0
+	vmuVersion = 2
+)
+
+func relayHadock(c net.Conn, queue <-chan []byte, mode int) error {
+	if mode < 0 {
+		return relayConn(c, queue)
+	}
+	var (
+		count uint16
+		buf   bytes.Buffer
+	)
+	preamble := uint16(hdkVersion) << 12 | uint16(vmuVersion) << 8 | uint16(mode)
+	for bs := range queue {
+		buf.Write(bs[:4])
+		binary.Write(&buf, binary.BigEndian, preamble)
+		binary.Write(&buf, binary.BigEndian, count)
+		binary.Write(&buf, binary.BigEndian, uint32(len(bs[8:])))
+		buf.Write(bs[8:])
+		binary.Write(&buf, binary.BigEndian, sum.Sum1071(bs[8:]))
+
+		count++
+		if n, err := io.Copy(c, &buf); err != nil {
+			if err, ok := err.(net.Error); ok && !err.Temporary() {
+				return err
+			}
+		} else {
+			log.Printf("packet %d/%d bytes written to %s", n, len(bs), c.RemoteAddr())
+		}
+	}
+	return nil
 }
 
 func relayConn(c net.Conn, queue <-chan []byte) error {
@@ -103,14 +146,14 @@ func relayConn(c net.Conn, queue <-chan []byte) error {
 			}
 			log.Printf("%s: write %d/%d bytes", err, n, len(bs))
 		} else {
-			log.Printf("packet %d bytes written to %s", n, c.RemoteAddr())
+			log.Printf("packet %d/%d bytes written to %s", n, len(bs), c.RemoteAddr())
 		}
 	}
 	return nil
 }
 
 func reassemble(r io.Reader, size int, keep bool) (<-chan []byte, error) {
-	q := make(chan []byte, size)
+	q := make(chan []byte, 128)
 	go func() {
 		defer close(q)
 		rs := erdle.Reassemble(r, false)
@@ -134,7 +177,6 @@ func reassemble(r io.Reader, size int, keep bool) (<-chan []byte, error) {
 			}
 			select {
 			case q <- xs:
-				log.Printf("packet %d sent (%d bytes)", i, len(xs))
 			default:
 				dropped++
 				log.Printf("packet %d dropped (%d bytes)", dropped, len(xs))

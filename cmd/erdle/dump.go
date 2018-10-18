@@ -31,7 +31,13 @@ func runDump(cmd *cli.Command, args []string) error {
 	var dump dumpFunc
 	switch *kind {
 	case "", "hrdl":
-		dump = dumpHRDL
+		if *proto == "file" {
+			dump = func (r io.Reader, hrdfe bool) error {
+				return dumpHRDL(erdle.Reassemble(r, hrdfe), hrdfe)
+			}
+		} else {
+			dump = dumpHRDL
+		}
 	case "vcdu", "cadu":
 		dump = dumpVCDU
 	default:
@@ -41,9 +47,9 @@ func runDump(cmd *cli.Command, args []string) error {
 	case "", "file":
 		return dumpFile(cmd.Flag.Args(), *hrdfe, dump)
 	case "udp":
-		return dumpUDP(cmd.Flag.Arg(0), *hrdfe, dump)
+		return dumpUDP(cmd.Flag.Arg(0), false, dump)
 	case "tcp":
-		return dumpTCP(cmd.Flag.Arg(0), *hrdfe, dump)
+		return dumpTCP(cmd.Flag.Arg(0), false, dump)
 	default:
 		return fmt.Errorf("unsupported protocol %s", *proto)
 	}
@@ -59,6 +65,7 @@ func dumpFile(ps []string, hrdfe bool, dump dumpFunc) error {
 		defer r.Close()
 		rs = append(rs, r)
 	}
+
 	return dump(io.MultiReader(rs...), hrdfe)
 }
 
@@ -94,7 +101,9 @@ func dumpTCP(a string, hrdfe bool, dump dumpFunc) error {
 		}
 		go func(r net.Conn) {
 			defer r.Close()
-			dump(r, hrdfe)
+			if err := dump(r, hrdfe); err != nil {
+				log.Println(r.RemoteAddr(), err)
+			}
 		}(r)
 	}
 	return nil
@@ -138,7 +147,7 @@ func dumpHRDL(r io.Reader, hrdfe bool) error {
 	const row = "%6d | %7d | %02x | %s | %9d | %s | %s | %02x | %s | %7d | %16s | %s"
 
 	logger := log.New(os.Stdout, "", 0)
-	r = erdle.Reassemble(r, hrdfe)
+	// r = erdle.Reassemble(r, hrdfe)
 	for i := 1; ; i++ {
 		e, err := erdle.DecodeHRDL(r)
 		switch {

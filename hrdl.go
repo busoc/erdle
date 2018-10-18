@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"hash"
 	"io"
 	"time"
@@ -38,21 +37,33 @@ type Erdle struct {
 }
 
 func DecodeHRDL(r io.Reader) (*Erdle, error) {
-	xs := make([]byte, 8<<20)
+	var (
+		h  HRDLHeader
+		rs *bytes.Buffer
+		xs []byte
+	)
 
-	n, err := r.Read(xs)
-	if err != nil {
-		return nil, err
-	}
-	r = bytes.NewReader(xs[:n])
+	if a, ok := r.(*assembler); ok {
+		xs = make([]byte, 8<<20)
+		n, err := a.Read(xs)
+		if err != nil {
+			return nil, err
+		}
+		rs = bytes.NewBuffer(xs[:n])
+		binary.Read(rs, binary.LittleEndian, &h.Sync)
+		binary.Read(rs, binary.LittleEndian, &h.Size)
+	} else {
+		xs = make([]byte, 8)
+		if _, err := io.ReadFull(r, xs); err != nil {
+			return nil, err
+		}
+		rs = bytes.NewBuffer(xs)
+		binary.Read(rs, binary.LittleEndian, &h.Sync)
+		binary.Read(rs, binary.LittleEndian, &h.Size)
 
-	var h HRDLHeader
-	binary.Read(r, binary.BigEndian, &h.Sync)
-	binary.Read(r, binary.LittleEndian, &h.Size)
-
-	bs := make([]byte, h.Size+4)
-	if _, err := io.ReadFull(r, bs); err != nil {
-		return nil, err
+		if _, err := io.CopyN(rs, r, int64(h.Size)+4); err != nil {
+			return nil, err
+		}
 	}
 
 	var (
@@ -60,7 +71,7 @@ func DecodeHRDL(r io.Reader) (*Erdle, error) {
 		fine   uint16
 		coarse uint32
 	)
-	rs := bytes.NewReader(bs)
+
 	binary.Read(rs, binary.LittleEndian, &h.Channel)
 	binary.Read(rs, binary.LittleEndian, &h.Source)
 	binary.Read(rs, binary.LittleEndian, &spare)
@@ -83,7 +94,6 @@ func DecodeHRDL(r io.Reader) (*Erdle, error) {
 		h.UPI = "SCIENCE"
 		bs := make([]byte, 32)
 		if _, err := rs.Read(bs); err != nil {
-			fmt.Println("oups something wrong happens science")
 			return nil, err
 		}
 		if u := string(bytes.Trim(bs, "\x00")); len(u) > 0 {
@@ -93,7 +103,6 @@ func DecodeHRDL(r io.Reader) (*Erdle, error) {
 		h.UPI = "IMAGE"
 		bs := make([]byte, 52)
 		if _, err := rs.Read(bs); err != nil {
-			fmt.Println("oups something wrong happens here - image")
 			return nil, err
 		}
 		if u := string(bytes.Trim(bs[20:], "\x00")); len(u) > 0 {
@@ -111,7 +120,7 @@ func DecodeHRDL(r io.Reader) (*Erdle, error) {
 		return nil, err
 	}
 	binary.Read(rs, binary.LittleEndian, &e.Control)
-	return &e, err
+	return &e, nil
 }
 
 func readTime6(coarse uint32, fine uint16) time.Time {
@@ -204,16 +213,16 @@ func (r *assembler) copyHRDL(xs, bs []byte) (int, error) {
 	if s > z {
 		s = z
 	}
-	r.digest.Write(xs[8 : s-4])
-	defer r.digest.Reset()
 
 	n := copy(bs, xs[:s])
 	r.rest.Write(xs[z:])
 
-	if g, w := s-12, int(binary.LittleEndian.Uint32(xs[4:])); g != w {
+	if g, w := s-12, int(binary.LittleEndian.Uint32(bs[4:])); g != w {
 		return n, LengthError{Got: g, Want: w}
 	}
-	if g, w := r.digest.Sum32(), binary.LittleEndian.Uint32(xs[s-4:]); g != w {
+	r.digest.Write(bs[8 : n-4])
+	defer r.digest.Reset()
+	if g, w := r.digest.Sum32(), binary.LittleEndian.Uint32(bs[n-4:]); g != w {
 		return n, ChecksumError{Got: g, Want: w}
 	}
 	return n, nil
