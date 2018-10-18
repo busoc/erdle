@@ -134,9 +134,9 @@ func relayHadock(c net.Conn, queue <-chan []byte, mode int) error {
 			if err, ok := err.(net.Error); ok && !err.Temporary() {
 				return err
 			}
-			log.Printf("packet (%d): %d bytes written", counter, err, n)
+			log.Printf("packet (%d): %s (%d bytes written)", counter, err, n)
 		} else {
-			log.Printf("packet (%d) %d bytes written to %s", counter, n, len(bs), addr)
+			log.Printf("packet (%d) %d bytes written to %s", counter, n, addr)
 		}
 	}
 	return nil
@@ -152,9 +152,9 @@ func relayConn(c net.Conn, queue <-chan []byte) error {
 			if err, ok := err.(net.Error); ok && !err.Temporary() {
 				return err
 			}
-			log.Printf("packet (%d): %d bytes written", counter, err, n)
+			log.Printf("packet (%d): %s (%d bytes written)", counter, err, n)
 		} else {
-			log.Printf("packet (%d) %d bytes written to %s", counter, n, len(bs), addr)
+			log.Printf("packet (%d) %d bytes written to %s", counter, n, addr)
 		}
 	}
 	return nil
