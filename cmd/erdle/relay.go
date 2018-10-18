@@ -114,39 +114,47 @@ func relayHadock(c net.Conn, queue <-chan []byte, mode int) error {
 		return relayConn(c, queue)
 	}
 	var (
-		count uint16
+		seq uint16
 		buf   bytes.Buffer
 	)
 	preamble := uint16(hdkVersion) << 12 | uint16(vmuVersion) << 8 | uint16(mode)
+
+	addr := c.RemoteAddr().String
+	var counter uint64
 	for bs := range queue {
 		buf.Write(bs[:4])
 		binary.Write(&buf, binary.BigEndian, preamble)
-		binary.Write(&buf, binary.BigEndian, count)
+		binary.Write(&buf, binary.BigEndian, seq)
 		binary.Write(&buf, binary.BigEndian, uint32(len(bs[8:])))
 		buf.Write(bs[8:])
 		binary.Write(&buf, binary.BigEndian, sum.Sum1071(bs[8:]))
 
-		count++
+		seq++
 		if n, err := io.Copy(c, &buf); err != nil {
 			if err, ok := err.(net.Error); ok && !err.Temporary() {
 				return err
 			}
+			log.Printf("packet (%d): %d bytes written", counter, err, n)
 		} else {
-			log.Printf("packet %d/%d bytes written to %s", n, len(bs), c.RemoteAddr())
+			log.Printf("packet (%d) %d bytes written to %s", counter, n, len(bs), addr)
 		}
 	}
 	return nil
 }
 
 func relayConn(c net.Conn, queue <-chan []byte) error {
+	addr := c.RemoteAddr().String()
+
+	var counter uint64
 	for bs := range queue {
+		counter++
 		if n, err := c.Write(bs); err != nil {
 			if err, ok := err.(net.Error); ok && !err.Temporary() {
 				return err
 			}
-			log.Printf("%s: write %d/%d bytes", err, n, len(bs))
+			log.Printf("packet (%d): %d bytes written", counter, err, n)
 		} else {
-			log.Printf("packet %d/%d bytes written to %s", n, len(bs), c.RemoteAddr())
+			log.Printf("packet (%d) %d bytes written to %s", counter, n, len(bs), addr)
 		}
 	}
 	return nil
