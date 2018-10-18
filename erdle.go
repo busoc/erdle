@@ -12,6 +12,12 @@ var (
 	Stuff = []byte{0xf8, 0x2e, 0x35, 0xaa}
 )
 
+type MissingCaduError int
+
+func (e MissingCaduError) Error() string {
+	return fmt.Sprintf("%d missing cadu(s) (%dbytes)", int(e), int(e)*caduBodyLen)
+}
+
 type LengthError struct {
 	Want int
 	Got  int
@@ -47,7 +53,7 @@ func IsErdleError(err error) bool {
 	switch err.(type) {
 	default:
 		return false
-	case LengthError, ChecksumError:
+	case LengthError, ChecksumError, MissingCaduError:
 		return true
 	}
 }
