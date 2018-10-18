@@ -42,6 +42,7 @@ type Cadu struct {
 type reader struct {
 	inner io.Reader
 	skip  int
+	// prev *Cadu
 }
 
 func NewReader(r io.Reader, hrdfe bool) io.Reader {
@@ -49,7 +50,7 @@ func NewReader(r io.Reader, hrdfe bool) io.Reader {
 	if hrdfe {
 		skip = 8
 	}
-	return &reader{r, skip}
+	return &reader{inner: r, skip: skip}
 }
 
 func (r *reader) Read(bs []byte) (int, error) {
@@ -63,6 +64,31 @@ func (r *reader) Read(bs []byte) (int, error) {
 	}
 	return n, nil
 }
+
+// func (r *reader) Read(bs []byte) (int, error) {
+// 	vs := make([]byte, caduPacketLen+r.skip)
+// 	if n, err := io.ReadFull(r.inner, vs); err != nil {
+// 		return n, err
+// 	}
+// 	vs = vs[r.skip:]
+// 	c, err := DecodeCadu(bytes.NewReader(vs))
+// 	if err != nil {
+// 		return 0, err
+// 	}
+// 	delta := c.Missing(r.prev)
+// 	r.prev = c
+// 	if delta > 0 {
+// 		return 0, MissingCaduError(delta)
+// 	}
+// 	if err := r.prev.Error; err != nil {
+// 		return 0, err
+// 	}
+// 	n := copy(bs, vs)
+// 	if n < caduPacketLen {
+// 		return n, io.ErrShortBuffer
+// 	}
+// 	return n, nil
+// }
 
 func DecodeCadu(r io.Reader) (*Cadu, error) {
 	bs := make([]byte, caduPacketLen)
