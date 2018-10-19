@@ -137,8 +137,6 @@ type assembler struct {
 	inner  *bufio.Reader
 	rest   *bytes.Buffer
 	skip   int
-
-	counter uint32
 }
 
 func Reassemble(r io.Reader, hrdfe bool) io.Reader {
@@ -228,12 +226,6 @@ func (r *assembler) readCadu() ([]byte, error) {
 	vs := make([]byte, caduPacketLen+r.skip)
 	if _, err := io.ReadFull(r.inner, vs); err != nil {
 		return nil, err
-	}
-	seq := binary.BigEndian.Uint32(vs[6:])>>8
-	diff := (seq - r.counter) & 0xFFF
-	r.counter = seq
-	if diff > 1 {
-		return nil, MissingCaduError(diff)
 	}
 	return vs[r.skip+caduHeaderLen : r.skip+caduPacketLen-caduCheckLen], nil
 }
