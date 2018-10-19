@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"time"
 
 	"github.com/busoc/erdle"
 	"github.com/midbel/cli"
@@ -96,7 +97,7 @@ func relayUDP(local, remote string, mode, size int, keep bool) error {
 	if err != nil {
 		return err
 	}
-	defer c.Close()
+	defer r.Close()
 	queue, err := reassemble(r, int(size), keep)
 	if err != nil {
 		return err
@@ -132,13 +133,14 @@ func relayHadock(c net.Conn, queue <-chan []byte, mode int) error {
 		binary.Write(&buf, binary.BigEndian, sum.Sum1071(bs[8:]))
 
 		seq++
+		w := time.Now()
 		if n, err := io.Copy(c, &buf); err != nil {
 			if err, ok := err.(net.Error); ok && !err.Temporary() {
 				return err
 			}
 			log.Printf("packet (%d): %s (%d bytes written)", counter, err, n)
 		} else {
-			log.Printf("packet (%d) %d bytes written to %s", counter, n, addr)
+			log.Printf("packet (%d) %d bytes written to %s (%s)", counter, n, addr, time.Since(w))
 		}
 	}
 	return nil
@@ -150,20 +152,21 @@ func relayConn(c net.Conn, queue <-chan []byte) error {
 	var counter uint64
 	for bs := range queue {
 		counter++
+		w := time.Now()
 		if n, err := c.Write(bs); err != nil {
 			if err, ok := err.(net.Error); ok && !err.Temporary() {
 				return err
 			}
 			log.Printf("packet (%d): %s (%d bytes written)", counter, err, n)
 		} else {
-			log.Printf("packet (%d) %d bytes written to %s", counter, n, addr)
+			log.Printf("packet (%d) %d bytes written to %s (%s)", counter, n, addr, time.Since(w))
 		}
 	}
 	return nil
 }
 
 func reassemble(r io.Reader, size int, keep bool) (<-chan []byte, error) {
-	q := make(chan []byte, 128)
+	q := make(chan []byte, size)
 	go func() {
 		defer close(q)
 		rs := erdle.Reassemble(r, false)

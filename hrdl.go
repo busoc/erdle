@@ -138,7 +138,6 @@ type assembler struct {
 	rest   *bytes.Buffer
 	skip   int
 
-	digest hash.Hash32
 	counter uint32
 }
 
@@ -146,7 +145,6 @@ func Reassemble(r io.Reader, hrdfe bool) io.Reader {
 	rs := &assembler{
 		inner:  bufio.NewReaderSize(r, 8<<20),
 		rest:   new(bytes.Buffer),
-		digest: SumHRDL(),
 	}
 	if hrdfe {
 		rs.skip = 8
@@ -211,6 +209,7 @@ func (r *assembler) copyHRDL(xs, bs []byte) (int, error) {
 	if s > z {
 		s = z
 	}
+	var digest hrdlSum
 
 	n := copy(bs, xs[:s])
 	r.rest.Write(xs[z:])
@@ -218,9 +217,8 @@ func (r *assembler) copyHRDL(xs, bs []byte) (int, error) {
 	if g, w := s-12, int(binary.LittleEndian.Uint32(bs[4:])); g != w {
 		return n, LengthError{Got: g, Want: w}
 	}
-	r.digest.Write(bs[8 : n-4])
-	defer r.digest.Reset()
-	if g, w := r.digest.Sum32(), binary.LittleEndian.Uint32(bs[n-4:]); g != w {
+	digest.Write(bs[8 : n-4])
+	if g, w := digest.Sum32(), binary.LittleEndian.Uint32(bs[n-4:]); g != w {
 		return n, ChecksumError{Got: g, Want: w}
 	}
 	return n, nil

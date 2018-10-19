@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"time"
+	"log"
 
 	"github.com/busoc/erdle"
 	"github.com/midbel/cli"
@@ -42,9 +43,13 @@ func runReplay(cmd *cli.Command, args []string) error {
 	}
 	r := erdle.NewReader(io.MultiReader(rs...), *hrdfe)
 
+	when := time.Now()
 	vs := make([]byte, 1024)
-	_, err = io.CopyBuffer(w, r, vs)
-	return nil
+	n, err := io.CopyBuffer(w, r, vs)
+	if err == nil {
+		log.Printf("%d KB sent in %s", n>>10, time.Since(when))
+	}
+	return err
 }
 
 func Replay(addr string, z cli.Size) (net.Conn, error) {
