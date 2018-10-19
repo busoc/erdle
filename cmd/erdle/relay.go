@@ -119,9 +119,11 @@ func relayHadock(c net.Conn, queue <-chan []byte, mode int) error {
 	)
 	preamble := uint16(hdkVersion) << 12 | uint16(vmuVersion) << 8 | uint16(mode)
 
-	addr := c.RemoteAddr().String
+	addr := c.RemoteAddr().String()
 	var counter uint64
 	for bs := range queue {
+		counter++
+	
 		buf.Write(bs[:4])
 		binary.Write(&buf, binary.BigEndian, preamble)
 		binary.Write(&buf, binary.BigEndian, seq)
