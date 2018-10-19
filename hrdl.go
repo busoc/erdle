@@ -134,16 +134,16 @@ func readTime6(coarse uint32, fine uint16) time.Time {
 const defaultOffset = caduBodyLen + 4
 
 type assembler struct {
-	// inner  io.Reader
 	inner  *bufio.Reader
 	rest   *bytes.Buffer
 	skip   int
+
 	digest hash.Hash32
+	counter uint32
 }
 
 func Reassemble(r io.Reader, hrdfe bool) io.Reader {
 	rs := &assembler{
-		// inner:  NewReader(bufio.NewReaderSize(r, 8<<20), hrdfe),
 		inner:  bufio.NewReaderSize(r, 8<<20),
 		rest:   new(bytes.Buffer),
 		digest: SumHRDL(),
@@ -174,7 +174,6 @@ func (r *assembler) Read(bs []byte) (int, error) {
 		xs = append(xs, vs...)
 		if ix := bytes.Index(xs, Word); ix >= 0 {
 			xs = bytes.Replace(xs[ix:], Stuff, Word[:3], -1)
-			// xs = xs[ix:]
 			break
 		}
 	}
@@ -228,14 +227,15 @@ func (r *assembler) copyHRDL(xs, bs []byte) (int, error) {
 }
 
 func (r *assembler) readCadu() ([]byte, error) {
-	// vs := make([]byte, caduPacketLen)
-	// if _, err := io.ReadFull(r.inner, vs); err != nil {
-	// 	return nil, err
-	// }
-	// return vs, nil
 	vs := make([]byte, caduPacketLen+r.skip)
 	if _, err := io.ReadFull(r.inner, vs); err != nil {
 		return nil, err
+	}
+	seq := binary.BigEndian.Uint32(vs[6:])>>8
+	diff := (seq - r.counter) & 0xFFF
+	r.counter = seq
+	if diff > 1 {
+		return nil, MissingCaduError(diff)
 	}
 	return vs[r.skip+caduHeaderLen : r.skip+caduPacketLen-caduCheckLen], nil
 }

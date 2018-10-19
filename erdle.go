@@ -15,7 +15,7 @@ var (
 type MissingCaduError int
 
 func (e MissingCaduError) Error() string {
-	return fmt.Sprintf("%d missing cadu(s) (%dbytes)", int(e), int(e)*caduBodyLen)
+	return fmt.Sprintf("%d missing cadu(s)", int(e))
 }
 
 type LengthError struct {

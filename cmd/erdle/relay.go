@@ -123,7 +123,7 @@ func relayHadock(c net.Conn, queue <-chan []byte, mode int) error {
 	var counter uint64
 	for bs := range queue {
 		counter++
-	
+
 		buf.Write(bs[:4])
 		binary.Write(&buf, binary.BigEndian, preamble)
 		binary.Write(&buf, binary.BigEndian, seq)
@@ -180,7 +180,7 @@ func reassemble(r io.Reader, size int, keep bool) (<-chan []byte, error) {
 				if !erdle.IsErdleError(err) {
 					return
 				}
-				log.Printf("skip packet (%d bytes): %s", n, err)
+				log.Printf("invalid packet (%d bytes): %s", n, err)
 				if !keep {
 					continue
 				}
