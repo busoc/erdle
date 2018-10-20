@@ -71,23 +71,17 @@ func relayTCP(local, remote string, mode, size int, keep bool) error {
 				r.Close()
 				w.Close()
 			}()
-			queue, err := reassemble(r, size, keep)
-			if err != nil {
-				return
-			}
-			if err := relayHadock(w, queue, mode); err != nil {
-				log.Println(err)
-			}
+			Relay(w, r)
 		}(r, w)
 	}
 }
 
 func relayUDP(local, remote string, mode, size int, keep bool) error {
-	c, err := net.Dial(protoFromAddr(remote))
+	w, err := net.Dial(protoFromAddr(remote))
 	if err != nil {
 		return err
 	}
-	defer c.Close()
+	defer w.Close()
 
 	a, err := net.ResolveUDPAddr("udp", local)
 	if err != nil {
@@ -98,11 +92,8 @@ func relayUDP(local, remote string, mode, size int, keep bool) error {
 		return err
 	}
 	defer r.Close()
-	queue, err := reassemble(r, int(size), keep)
-	if err != nil {
-		return err
-	}
-	return relayHadock(c, queue, mode)
+
+	return Relay(w, r)
 }
 
 const (
@@ -163,6 +154,25 @@ func relayConn(c net.Conn, queue <-chan []byte) error {
 		}
 	}
 	return nil
+}
+
+func Relay(w io.Writer, r io.Reader) error {
+	a := erdle.Reassemble(r, false)
+	_, err := io.CopyBuffer(&relayWriter{w}, &relayReader{a}, make([]byte, 8<<20))
+	return err
+}
+
+type relayWriter struct { w io.Writer }
+func (c *conn) Write(bs []byte) (int, error) { return c.w.Write(bs) }
+
+type relayReader struct { inner io.Reader }
+
+func (r *relayReader) Read(bs []byte) (int, error) {
+	if n, err := r.inner.Read(bs); erdle.IsErdleError(err) {
+		return 0, nil
+	} else {
+		return n, err
+	}
 }
 
 func reassemble(r io.Reader, size int, keep bool) (<-chan []byte, error) {
