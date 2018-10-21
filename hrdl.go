@@ -1,7 +1,6 @@
 package erdle
 
 import (
-	// "log"
 	"bufio"
 	"bytes"
 	"encoding/binary"
@@ -9,6 +8,8 @@ import (
 	"io"
 	"time"
 )
+
+const hrdlHeaderSize = 12
 
 type HRDLHeader struct {
 	// HRDL Header Fields
@@ -135,15 +136,15 @@ func readTime6(coarse uint32, fine uint16) time.Time {
 const defaultOffset = caduBodyLen + 4
 
 type assembler struct {
-	inner  *bufio.Reader
-	rest   *bytes.Buffer
-	skip   int
+	inner *bufio.Reader
+	rest  *bytes.Buffer
+	skip  int
 }
 
 func Reassemble(r io.Reader, hrdfe bool) io.Reader {
 	rs := &assembler{
-		inner:  bufio.NewReaderSize(r, 8<<20),
-		rest:   new(bytes.Buffer),
+		inner: bufio.NewReaderSize(r, 8<<20),
+		rest:  new(bytes.Buffer),
 	}
 	if hrdfe {
 		rs.skip = 8
@@ -152,15 +153,13 @@ func Reassemble(r io.Reader, hrdfe bool) io.Reader {
 }
 
 func (r *assembler) Read(bs []byte) (int, error) {
-	z := len(bs)
-	if len(bs) < r.rest.Len() {
-		z = r.rest.Len()
-	}
-	xs := make([]byte, r.rest.Len(), z)
-	if _, err := io.ReadFull(r.rest, xs); err != nil {
+	var written int
+	if n, err := io.ReadAtLeast(r.rest, bs, r.rest.Len()); err != nil {
 		return 0, err
+	} else {
+		written = n
 	}
-	if n, err := r.copyHRDL(xs, bs); n > 0 {
+	if n, err := r.copyHRDL(bs[:written]); n > 0 {
 		return n, err
 	}
 	for {
@@ -168,61 +167,58 @@ func (r *assembler) Read(bs []byte) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		xs = append(xs, vs...)
-		if ix := bytes.Index(xs, Word); ix >= 0 {
-			// xs = bytes.Replace(xs[ix:], Stuff, Word[:3], -1)
-			xs = stuffBytes(xs[ix:])
+		written += copy(bs[written:], vs)
+		if ix := bytes.Index(bs[:written], Word); ix >= 0 {
+			written = copy(bs[0:], stuffBytes(bs[ix:written]))
 			break
 		}
 	}
 	for {
-		if n, err := r.copyHRDL(xs, bs); n > 0 {
+		if n, err := r.copyHRDL(bs[:written]); n > 0 {
 			return n, err
 		}
 		vs, err := r.readCadu()
 		if err != nil {
-			return 0, err
+			return 0, nil
 		}
-		xs = append(xs, vs...)
-		offset := len(xs) - caduPacketLen
-		if offset < 0 {
-			offset = 0
-		}
-		// copy(xs[offset:], bytes.Replace(xs[offset:], Stuff, Word[:3], -1))
-		copy(xs[offset-4:], stuffBytes(xs[offset-4:]))
+		z := copy(bs[written:], vs)
+		copy(bs[written-4:], stuffBytes(bs[written-4:written+z]))
+		written += z
 	}
 }
 
-func (r *assembler) copyHRDL(xs, bs []byte) (int, error) {
-	if len(xs) < 8 || !bytes.Equal(xs[:len(Word)], Word) {
+func (r *assembler) copyHRDL(bs []byte) (int, error) {
+	if len(bs) < 8 || !bytes.Equal(bs[:len(Word)], Word) {
 		return 0, nil
 	}
-	offset := len(xs) - defaultOffset
+	offset := len(bs) - 2048
 	if offset <= 0 {
 		offset = len(Word)
 	}
-	ix := bytes.Index(xs[offset:], Word)
-	if ix < 0 {
+	z := bytes.Index(bs[offset:], Word)
+	if z < 0 {
 		return 0, nil
 	}
-	z := ix + offset
-	s := int(binary.LittleEndian.Uint32(xs[len(Word):])) + 12
-	if s > z {
-		s = z
-	}
-	var digest hrdlSum
+	z += offset
+	r.rest.Write(bs[z:])
 
-	n := copy(bs, xs[:s])
-	r.rest.Write(xs[z:])
+	size := int(binary.LittleEndian.Uint32(bs[len(Word):]))
+	if err := verifyHRDL(bs[:size+hrdlHeaderSize]); err != nil {
+		return z, err
+	}
+	// if s := size + hrdlHeaderSize; s != z {
+	// 	return z, LengthError{Want: s, Got: z}
+	// }
+	return size + hrdlHeaderSize, nil
+}
 
-	if g, w := s-12, int(binary.LittleEndian.Uint32(bs[4:])); g != w {
-		return n, LengthError{Got: g, Want: w}
+func verifyHRDL(bs []byte) error {
+	var h hrdlSum
+	h.Write(bs[8 : len(bs)-4])
+	if g, w := h.Sum32(), binary.LittleEndian.Uint32(bs[len(bs)-4:]); g != w {
+		return ChecksumError{Want: w, Got: g}
 	}
-	digest.Write(bs[8 : n-4])
-	if g, w := digest.Sum32(), binary.LittleEndian.Uint32(bs[n-4:]); g != w {
-		return n, ChecksumError{Got: g, Want: w}
-	}
-	return n, nil
+	return nil
 }
 
 func (r *assembler) readCadu() ([]byte, error) {
