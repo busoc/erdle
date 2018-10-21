@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
 	"net"
-	"time"
 
 	"github.com/busoc/erdle"
 	"github.com/midbel/cli"
@@ -25,14 +23,14 @@ var relayCommand = &cli.Command{
 	Run:   runRelay,
 }
 
-type relayFunc func(string, string, int) error
+type relayFunc func(string, string, string, int) error
 
 func runRelay(cmd *cli.Command, args []string) error {
 	rate, _ := cli.ParseSize("32m")
 	cmd.Flag.Var(&rate, "r", "bandwidth")
 	mode := cmd.Flag.Int("i", -1, "instance")
 	// proto := cmd.Flag.String("p", "tcp", "default protocol")
-	// proxy := cmd.Flag.String("d", "", "proxy packets to")
+	proxy := cmd.Flag.String("d", "", "proxy packets to")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
@@ -52,10 +50,10 @@ func runRelay(cmd *cli.Command, args []string) error {
 		return fmt.Errorf("unsupported instance")
 	}
 
-	return relay(addr, cmd.Flag.Arg(1), *mode)
+	return relay(addr, cmd.Flag.Arg(1), *proxy, *mode)
 }
 
-func relayTCP(local, remote string, mode int) error {
+func relayTCP(local, remote, proxy string, mode int) error {
 	c, err := net.Listen("tcp", local)
 	if err != nil {
 		return err
@@ -76,14 +74,14 @@ func relayTCP(local, remote string, mode int) error {
 				r.Close()
 				w.Close()
 			}()
-			if err := Relay(w, r, mode); err != nil {
+			if err := Relay(w, r, mode, proxy); err != nil {
 				log.Println(err)
 			}
 		}(r, w)
 	}
 }
 
-func relayUDP(local, remote string, mode int) error {
+func relayUDP(local, remote, proxy string, mode int) error {
 	w, err := net.Dial(protoFromAddr(remote))
 	if err != nil {
 		return err
@@ -100,10 +98,14 @@ func relayUDP(local, remote string, mode int) error {
 	}
 	defer r.Close()
 
-	return Relay(w, r, mode)
+	return Relay(w, r, mode, proxy)
 }
 
-func Relay(w io.Writer, r io.Reader, mode int) error {
+func Relay(w io.Writer, r io.Reader, mode int, proxy string) error {
+	if x, err := net.Dial(protoFromAddr(proxy)); err == nil {
+		defer x.Close()
+		r = io.TeeReader(r, x)
+	}
 	a := erdle.Reassemble(r, false)
 	var p uint16
 	switch mode {
@@ -117,8 +119,8 @@ func Relay(w io.Writer, r io.Reader, mode int) error {
 	return err
 }
 
-type relayWriter struct{
-	w io.Writer
+type relayWriter struct {
+	w       io.Writer
 	version uint16
 	counter uint16
 }
