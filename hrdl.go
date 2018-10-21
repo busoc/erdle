@@ -203,12 +203,12 @@ func (r *assembler) copyHRDL(bs []byte) (int, error) {
 	r.rest.Write(bs[z:])
 
 	size := int(binary.LittleEndian.Uint32(bs[len(Word):]))
+	if s := size + hrdlHeaderSize; s > z {
+		return z, LengthError{Want: s, Got: z}
+	}
 	if err := verifyHRDL(bs[:size+hrdlHeaderSize]); err != nil {
 		return z, err
 	}
-	// if s := size + hrdlHeaderSize; s != z {
-	// 	return z, LengthError{Want: s, Got: z}
-	// }
 	return size + hrdlHeaderSize, nil
 }
 

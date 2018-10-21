@@ -71,7 +71,9 @@ func relayTCP(local, remote string, mode, size int, keep bool) error {
 				r.Close()
 				w.Close()
 			}()
-			Relay(w, r)
+			if err := Relay(w, r, mode); err != nil {
+				log.Println(err)
+			}
 		}(r, w)
 	}
 }
@@ -93,7 +95,7 @@ func relayUDP(local, remote string, mode, size int, keep bool) error {
 	}
 	defer r.Close()
 
-	return Relay(w, r)
+	return Relay(w, r, mode)
 }
 
 const (
@@ -156,21 +158,57 @@ func relayConn(c net.Conn, queue <-chan []byte) error {
 	return nil
 }
 
-func Relay(w io.Writer, r io.Reader) error {
+func Relay(w io.Writer, r io.Reader, mode int) error {
 	a := erdle.Reassemble(r, false)
-	_, err := io.CopyBuffer(&relayWriter{w}, &relayReader{a}, make([]byte, 8<<20))
+	var p uint16
+	switch mode {
+	case 0, 1, 2, 255:
+		p = uint16(hdkVersion)<<12 | uint16(vmuVersion)<<8 | uint16(mode)
+	default:
+	}
+	rs := &relayReader{a}
+	ws := &relayWriter{w: w, version: p}
+	_, err := io.CopyBuffer(ws, rs, make([]byte, 8<<20))
 	return err
 }
 
-type relayWriter struct{ w io.Writer }
+type relayWriter struct{
+	w io.Writer
+	version uint16
+	counter uint16
+}
 
-func (w *relayWriter) Write(bs []byte) (int, error) { return w.w.Write(bs) }
+func (w *relayWriter) Write(bs []byte) (int, error) {
+	if w.version != 0 {
+		vs := make([]byte, len(bs)+14)
+		// buf := bytes.NewBuffer(vs)
+		// buf.Write(bs[:4])
+		// binary.Write(buf, binary.BigEndian, w.version)
+		// binary.Write(buf, binary.BigEndian, w.counter)
+		// binary.Write(buf, binary.BigEndian, uint32(len(bs)-8))
+		// buf.Write(bs[8:])
+		// binary.Write(buf, binary.BigEndian, sum.Sum1071(bs[8:]))
+		//
+		// _, err := io.Copy(w.w, buf)
+		copy(vs, bs[:4])
+		binary.BigEndian.PutUint16(vs[4:], w.version)
+		binary.BigEndian.PutUint16(vs[6:], w.counter)
+		binary.BigEndian.PutUint32(vs[8:], uint32(len(bs)-8))
+		n := copy(vs[12:], bs[8:])
+		binary.BigEndian.PutUint16(vs[12+n:], sum.Sum1071(bs[8:]))
+
+		w.counter++
+		_, err := w.w.Write(vs)
+		return len(bs), err
+	} else {
+		return w.w.Write(bs)
+	}
+}
 
 type relayReader struct{ inner io.Reader }
 
 func (r *relayReader) Read(bs []byte) (int, error) {
 	if n, err := r.inner.Read(bs); erdle.IsErdleError(err) {
-		log.Println(err)
 		return 0, nil
 	} else {
 		return n, err
