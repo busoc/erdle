@@ -107,9 +107,9 @@ func relayHadock(c net.Conn, queue <-chan []byte, mode int) error {
 	}
 	var (
 		seq uint16
-		buf   bytes.Buffer
+		buf bytes.Buffer
 	)
-	preamble := uint16(hdkVersion) << 12 | uint16(vmuVersion) << 8 | uint16(mode)
+	preamble := uint16(hdkVersion)<<12 | uint16(vmuVersion)<<8 | uint16(mode)
 
 	addr := c.RemoteAddr().String()
 	var counter uint64
@@ -162,13 +162,15 @@ func Relay(w io.Writer, r io.Reader) error {
 	return err
 }
 
-type relayWriter struct { w io.Writer }
+type relayWriter struct{ w io.Writer }
+
 func (w *relayWriter) Write(bs []byte) (int, error) { return w.w.Write(bs) }
 
-type relayReader struct { inner io.Reader }
+type relayReader struct{ inner io.Reader }
 
 func (r *relayReader) Read(bs []byte) (int, error) {
 	if n, err := r.inner.Read(bs); erdle.IsErdleError(err) {
+		log.Println(err)
 		return 0, nil
 	} else {
 		return n, err

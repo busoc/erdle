@@ -32,7 +32,7 @@ func runDump(cmd *cli.Command, args []string) error {
 	switch *kind {
 	case "", "hrdl":
 		if *proto == "file" {
-			dump = func (r io.Reader, hrdfe bool) error {
+			dump = func(r io.Reader, hrdfe bool) error {
 				return dumpHRDL(erdle.Reassemble(r, hrdfe), hrdfe)
 			}
 		} else {

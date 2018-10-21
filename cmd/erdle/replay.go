@@ -2,10 +2,10 @@ package main
 
 import (
 	"io"
+	"log"
 	"net"
 	"os"
 	"time"
-	"log"
 
 	"github.com/busoc/erdle"
 	"github.com/midbel/cli"
