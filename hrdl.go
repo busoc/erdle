@@ -1,6 +1,7 @@
 package erdle
 
 import (
+	// "log"
 	"bufio"
 	"bytes"
 	"encoding/binary"
@@ -169,7 +170,8 @@ func (r *assembler) Read(bs []byte) (int, error) {
 		}
 		xs = append(xs, vs...)
 		if ix := bytes.Index(xs, Word); ix >= 0 {
-			xs = bytes.Replace(xs[ix:], Stuff, Word[:3], -1)
+			// xs = bytes.Replace(xs[ix:], Stuff, Word[:3], -1)
+			xs = stuffBytes(xs[ix:])
 			break
 		}
 	}
@@ -186,7 +188,8 @@ func (r *assembler) Read(bs []byte) (int, error) {
 		if offset < 0 {
 			offset = 0
 		}
-		copy(xs[offset:], bytes.Replace(xs[offset:], Stuff, Word[:3], -1))
+		// copy(xs[offset:], bytes.Replace(xs[offset:], Stuff, Word[:3], -1))
+		copy(xs[offset-4:], stuffBytes(xs[offset-4:]))
 	}
 }
 
@@ -228,6 +231,10 @@ func (r *assembler) readCadu() ([]byte, error) {
 		return nil, err
 	}
 	return vs[r.skip+caduHeaderLen : r.skip+caduPacketLen-caduCheckLen], nil
+}
+
+func stuffBytes(bs []byte) []byte {
+	return bytes.Replace(bs, Stuff, Stuff[:3], -1)
 }
 
 type hrdlSum struct {

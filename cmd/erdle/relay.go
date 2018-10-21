@@ -163,7 +163,7 @@ func Relay(w io.Writer, r io.Reader) error {
 }
 
 type relayWriter struct { w io.Writer }
-func (c *conn) Write(bs []byte) (int, error) { return c.w.Write(bs) }
+func (w *relayWriter) Write(bs []byte) (int, error) { return w.w.Write(bs) }
 
 type relayReader struct { inner io.Reader }
 
