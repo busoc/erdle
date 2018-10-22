@@ -141,15 +141,19 @@ type assembler struct {
 	skip  int
 
 	counter uint32
+	total   uint64
 }
 
-const caduLimCounter = 1<<24
+const (
+	caduCounterLim = 1<<24
+	caduCounterMask = 0x0FFF
+)
 
 func Reassemble(r io.Reader, hrdfe bool) io.Reader {
 	rs := &assembler{
 		inner: bufio.NewReaderSize(r, 8<<20),
 		rest:  new(bytes.Buffer),
-		counter: caduLimCounter,
+		counter: caduCounterLim,
 	}
 	if hrdfe {
 		rs.skip = 8
@@ -227,18 +231,20 @@ func verifyHRDL(bs []byte) error {
 }
 
 func (r *assembler) readCadu() ([]byte, error) {
-	var err error
+	r.total++
 	vs := make([]byte, caduPacketLen+r.skip)
-	if _, err = io.ReadFull(r.inner, vs); err != nil {
+	if _, err := io.ReadFull(r.inner, vs); err != nil {
 		return nil, err
 	}
-	// seq := binary.BigEndian.Uint32(vs[r.skip+6:])
-	// if r.counter != 1<<24 {
-	// 	if diff := (seq - r.counter) & 0xFFF; diff > 1 {
-	// 		err = MissingCaduError(int(delta))
-	// 	}
-	// }
-	// r.counter = seq
+	seq := binary.BigEndian.Uint32(vs[r.skip+6:]) >> 8
+
+	var err error
+	if r.counter != caduCounterLim {
+		if diff := (seq - r.counter) & caduCounterMask; diff > 1 {
+			// err = MissingCaduError(int(diff))
+		}
+	}
+	r.counter = seq
 	return vs[r.skip+caduHeaderLen : r.skip+caduPacketLen-caduCheckLen], err
 }
 

@@ -46,7 +46,7 @@ func runCount(cmd *cli.Command, args []string) error {
 	default:
 		return fmt.Errorf("%s unsupported", *kind)
 	}
-	reports, errLen, errSum, _, err := countPackets(cmd.Flag.Args(), *hrdfe, by)
+	reports, errLen, errSum, errMiss, err := countPackets(cmd.Flag.Args(), *hrdfe, by)
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func runCount(cmd *cli.Command, args []string) error {
 		}
 		logger.Printf(row, *kind, mode, b&0xFF, c.Count, c.First, c.Last, c.Missing, c.Size>>20)
 	}
-	logger.Printf("%d VMU packets (%d bad sum, %d bad length, %dKB)", z.Count, errSum, errLen, z.Size>>10)
+	logger.Printf("%d VMU packets (%d cadu(s) missing, %d bad sum, %d bad length, %dKB)", z.Count, errMiss, errSum, errLen, z.Size>>10)
 	return nil
 }
 
