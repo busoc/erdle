@@ -41,6 +41,11 @@ func IsInvalidLength(err error) bool {
 	return ok
 }
 
+func IsMissingCadu(err error) bool {
+	_, ok := err.(MissingCaduError)
+	return ok
+}
+
 func IsInvalidSum(err error) bool {
 	_, ok := err.(ChecksumError)
 	return ok

@@ -139,12 +139,17 @@ type assembler struct {
 	inner *bufio.Reader
 	rest  *bytes.Buffer
 	skip  int
+
+	counter uint32
 }
+
+const caduLimCounter = 1<<24
 
 func Reassemble(r io.Reader, hrdfe bool) io.Reader {
 	rs := &assembler{
 		inner: bufio.NewReaderSize(r, 8<<20),
 		rest:  new(bytes.Buffer),
+		counter: caduLimCounter,
 	}
 	if hrdfe {
 		rs.skip = 8
@@ -222,11 +227,19 @@ func verifyHRDL(bs []byte) error {
 }
 
 func (r *assembler) readCadu() ([]byte, error) {
+	var err error
 	vs := make([]byte, caduPacketLen+r.skip)
-	if _, err := io.ReadFull(r.inner, vs); err != nil {
+	if _, err = io.ReadFull(r.inner, vs); err != nil {
 		return nil, err
 	}
-	return vs[r.skip+caduHeaderLen : r.skip+caduPacketLen-caduCheckLen], nil
+	// seq := binary.BigEndian.Uint32(vs[r.skip+6:])
+	// if r.counter != 1<<24 {
+	// 	if diff := (seq - r.counter) & 0xFFF; diff > 1 {
+	// 		err = MissingCaduError(int(delta))
+	// 	}
+	// }
+	// r.counter = seq
+	return vs[r.skip+caduHeaderLen : r.skip+caduPacketLen-caduCheckLen], err
 }
 
 func stuffBytes(bs []byte) []byte {

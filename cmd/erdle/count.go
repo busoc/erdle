@@ -46,7 +46,7 @@ func runCount(cmd *cli.Command, args []string) error {
 	default:
 		return fmt.Errorf("%s unsupported", *kind)
 	}
-	reports, errLen, errSum, err := countPackets(cmd.Flag.Args(), *hrdfe, by)
+	reports, errLen, errSum, _, err := countPackets(cmd.Flag.Args(), *hrdfe, by)
 	if err != nil {
 		return err
 	}
@@ -68,12 +68,12 @@ func runCount(cmd *cli.Command, args []string) error {
 	return nil
 }
 
-func countPackets(ps []string, hrdfe bool, by byFunc) (map[uint16]*Coze, uint64, uint64, error) {
+func countPackets(ps []string, hrdfe bool, by byFunc) (map[uint16]*Coze, uint64, uint64, uint64, error) {
 	var rs []io.Reader
 	for _, p := range ps {
 		r, err := os.Open(p)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, 0, err
 		}
 		defer r.Close()
 		rs = append(rs, r)
@@ -81,7 +81,7 @@ func countPackets(ps []string, hrdfe bool, by byFunc) (map[uint16]*Coze, uint64,
 	r := erdle.Reassemble(io.MultiReader(rs...), hrdfe)
 
 	zs := make(map[uint16]*Coze)
-	var errSum, errLen uint64
+	var errSum, errLen, errMiss uint64
 
 Loop:
 	for {
@@ -95,8 +95,11 @@ Loop:
 		case err != nil && erdle.IsInvalidSum(err):
 			errSum++
 			continue
+		case err != nil && erdle.IsMissingCadu(err):
+			errMiss++
+			continue
 		case err != nil && !erdle.IsErdleError(err):
-			return nil, 0, 0, err
+			return nil, 0, 0, 0, err
 		}
 		key, seq := by(e)
 		curr, ok := zs[key]
@@ -114,7 +117,7 @@ Loop:
 		curr.Missing += sequenceDelta(seq, curr.Last)
 		curr.Last = seq
 	}
-	return zs, errLen, errSum, nil
+	return zs, errLen, errSum, errMiss, nil
 }
 
 func sequenceDelta(current, last uint32) uint64 {
