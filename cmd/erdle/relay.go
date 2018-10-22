@@ -23,7 +23,7 @@ var relayCommand = &cli.Command{
 	Run:   runRelay,
 }
 
-type relayFunc func(string, string, string, int) error
+type relayFunc func(string, string, string, int, cli.Size) error
 
 func runRelay(cmd *cli.Command, args []string) error {
 	rate, _ := cli.ParseSize("32m")
@@ -50,10 +50,10 @@ func runRelay(cmd *cli.Command, args []string) error {
 		return fmt.Errorf("unsupported instance")
 	}
 
-	return relay(addr, cmd.Flag.Arg(1), *proxy, *mode)
+	return relay(addr, cmd.Flag.Arg(1), *proxy, *mode, rate)
 }
 
-func relayTCP(local, remote, proxy string, mode int) error {
+func relayTCP(local, remote, proxy string, mode int, z cli.Size) error {
 	c, err := net.Listen("tcp", local)
 	if err != nil {
 		return err
@@ -74,14 +74,14 @@ func relayTCP(local, remote, proxy string, mode int) error {
 				r.Close()
 				w.Close()
 			}()
-			if err := Relay(w, r, mode, proxy); err != nil {
+			if err := Relay(Replayer(w, z), r, mode, proxy); err != nil {
 				log.Println(err)
 			}
 		}(r, w)
 	}
 }
 
-func relayUDP(local, remote, proxy string, mode int) error {
+func relayUDP(local, remote, proxy string, mode int, z cli.Size) error {
 	w, err := net.Dial(protoFromAddr(remote))
 	if err != nil {
 		return err
@@ -98,7 +98,7 @@ func relayUDP(local, remote, proxy string, mode int) error {
 	}
 	defer r.Close()
 
-	return Relay(w, r, mode, proxy)
+	return Relay(Replayer(w, z), r, mode, proxy)
 }
 
 func Relay(w io.Writer, r io.Reader, mode int, proxy string) error {

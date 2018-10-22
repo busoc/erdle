@@ -57,13 +57,17 @@ func Replay(addr string, z cli.Size) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	return Replayer(c, z), nil
+}
+
+func Replayer(c net.Conn, z cli.Size) net.Conn {
 	if z == 0 {
-		return c, err
+		return c
 	}
 	return &replay{
 		Conn:    c,
 		limiter: rate.NewLimiter(rate.Limit(z.Float()), int(z.Int())/10),
-	}, nil
+	}
 }
 
 type replay struct {
