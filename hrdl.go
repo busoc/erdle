@@ -179,7 +179,7 @@ func (r *assembler) Read(bs []byte) (int, error) {
 		}
 		vs, err := r.readCadu()
 		if err != nil {
-			return 0, nil
+			return 0, err
 		}
 		z := copy(bs[written:], vs)
 		copy(bs[written-4:], stuffBytes(bs[written-4:written+z]))
