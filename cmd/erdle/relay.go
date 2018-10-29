@@ -23,13 +23,10 @@ var relayCommand = &cli.Command{
 	Run:   runRelay,
 }
 
-type relayFunc func(string, string, string, int, cli.Size) error
+type relayFunc func(string, string, string, int) error
 
 func runRelay(cmd *cli.Command, args []string) error {
-	rate, _ := cli.ParseSize("32m")
-	cmd.Flag.Var(&rate, "r", "bandwidth")
 	mode := cmd.Flag.Int("i", -1, "instance")
-	// proto := cmd.Flag.String("p", "tcp", "default protocol")
 	proxy := cmd.Flag.String("d", "", "proxy packets to")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
@@ -50,10 +47,10 @@ func runRelay(cmd *cli.Command, args []string) error {
 		return fmt.Errorf("unsupported instance")
 	}
 
-	return relay(addr, cmd.Flag.Arg(1), *proxy, *mode, rate)
+	return relay(addr, cmd.Flag.Arg(1), *proxy, *mode)
 }
 
-func relayTCP(local, remote, proxy string, mode int, z cli.Size) error {
+func relayTCP(local, remote, proxy string, mode int) error {
 	c, err := net.Listen("tcp", local)
 	if err != nil {
 		return err
@@ -74,14 +71,14 @@ func relayTCP(local, remote, proxy string, mode int, z cli.Size) error {
 				r.Close()
 				w.Close()
 			}()
-			if err := Relay(Replayer(w, z), r, mode, proxy); err != nil {
+			if err := Relay(w, r, mode, proxy); err != nil {
 				log.Println(err)
 			}
 		}(r, w)
 	}
 }
 
-func relayUDP(local, remote, proxy string, mode int, z cli.Size) error {
+func relayUDP(local, remote, proxy string, mode int) error {
 	w, err := net.Dial(protoFromAddr(remote))
 	if err != nil {
 		return err
@@ -98,7 +95,7 @@ func relayUDP(local, remote, proxy string, mode int, z cli.Size) error {
 	}
 	defer r.Close()
 
-	return Relay(Replayer(w, z), r, mode, proxy)
+	return Relay(w, r, mode, proxy)
 }
 
 func Relay(w io.Writer, r io.Reader, mode int, proxy string) error {
@@ -128,15 +125,7 @@ type relayWriter struct {
 func (w *relayWriter) Write(bs []byte) (int, error) {
 	if w.version != 0 {
 		vs := make([]byte, len(bs)+14)
-		// buf := bytes.NewBuffer(vs)
-		// buf.Write(bs[:4])
-		// binary.Write(buf, binary.BigEndian, w.version)
-		// binary.Write(buf, binary.BigEndian, w.counter)
-		// binary.Write(buf, binary.BigEndian, uint32(len(bs)-8))
-		// buf.Write(bs[8:])
-		// binary.Write(buf, binary.BigEndian, sum.Sum1071(bs[8:]))
-		//
-		// _, err := io.Copy(w.w, buf)
+
 		copy(vs, bs[:4])
 		binary.BigEndian.PutUint16(vs[4:], w.version)
 		binary.BigEndian.PutUint16(vs[6:], w.counter)
