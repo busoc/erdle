@@ -85,11 +85,8 @@ func (b *Builder) Read(bs []byte) (int, error) {
 			offset = written
 			written += n
 		}
-		if ix := bytes.LastIndex(bs[:written], b.Word); ix >= len(b.Word) {
-			b.size, b.written = 0, 0
-			b.digest.Reset()
-			b.buffer = append(b.buffer[:0], bs[ix:written]...)
-			return ix, nil
+		if ix := b.isFull(bs[len(b.Word):written]); ix >= 0 {
+			return len(b.Word) + ix, nil
 		}
 		b.size = int(b.Order.Uint32(bs[4:])) + hrdlMetaLen
 	}
@@ -98,10 +95,7 @@ func (b *Builder) Read(bs []byte) (int, error) {
 		if offset >= len(b.Word) {
 			offset -= len(b.Word)
 		}
-		if ix := bytes.Index(bs[offset:written], b.Word); ix >= 0 {
-			b.size, b.written = 0, 0
-			b.digest.Reset()
-			b.buffer = append(b.buffer[:0], bs[offset+ix:written]...)
+		if ix := b.isFull(bs[offset:written]); ix >= 0 {
 			return offset + ix, nil
 		}
 		n, err := b.inner.Read(bs[written : written+caduBodyLen])
@@ -112,14 +106,37 @@ func (b *Builder) Read(bs []byte) (int, error) {
 		written += n
 		b.written += n
 	}
-	if ix := bytes.Index(bs[offset:written], b.Word); ix >= 0 {
-		b.size, b.written = 0, 0
-		b.digest.Reset()
-		b.buffer = append(b.buffer[:0], bs[offset+ix:written]...)
+	if ix := b.isFull(bs[offset:written]); ix >= 0 {
 		return offset + ix, nil
 	}
 	b.written += written
 	return written, nil
+}
+
+func (b *Builder) isFull(bs []byte) int {
+	ix := bytes.Index(bs, b.Word)
+	if ix < 0 {
+		return ix
+	}
+	b.size, b.written = 0, 0
+	b.digest.Reset()
+	b.buffer = append(b.buffer[:0], bs[ix:]...)
+	return ix
+}
+
+type Decoder struct {
+	inner io.Reader
+}
+
+func NewDecoder(r io.Reader, hrdfe bool) *Decoder {
+	if _, ok := r.(*Builder); !ok {
+		r = NewBuilder(r, hrdfe)
+	}
+	return &Decoder{inner: r}
+}
+
+func (d *Decoder) Decode() (*Erdle, error) {
+	return nil, nil
 }
 
 type HRDLHeader struct {
