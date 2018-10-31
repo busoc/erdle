@@ -39,10 +39,10 @@ type Cadu struct {
 	Error     error
 }
 
-type reader struct {
+type vcduReader struct {
 	inner io.Reader
 	skip  int
-	// prev *Cadu
+	body  bool
 }
 
 func NewReader(r io.Reader, hrdfe bool) io.Reader {
@@ -50,45 +50,33 @@ func NewReader(r io.Reader, hrdfe bool) io.Reader {
 	if hrdfe {
 		skip = 8
 	}
-	return &reader{inner: r, skip: skip}
+	return &vcduReader{inner: r, skip: skip}
 }
 
-func (r *reader) Read(bs []byte) (int, error) {
-	vs := make([]byte, caduPacketLen+r.skip)
-	if n, err := io.ReadFull(r.inner, vs); err != nil {
-		return n, err
-	}
-	n := copy(bs, vs[r.skip:])
-	if n < caduPacketLen {
-		return n, io.ErrShortBuffer
+func (r *vcduReader) Read(bs []byte) (int, error) {
+	var n int
+	for n < len(bs) {
+		nn, err := r.readSingle(bs[n:])
+		if err != nil {
+			return n, err
+		}
+		n += nn
 	}
 	return n, nil
 }
 
-// func (r *reader) Read(bs []byte) (int, error) {
-// 	vs := make([]byte, caduPacketLen+r.skip)
-// 	if n, err := io.ReadFull(r.inner, vs); err != nil {
-// 		return n, err
-// 	}
-// 	vs = vs[r.skip:]
-// 	c, err := DecodeCadu(bytes.NewReader(vs))
-// 	if err != nil {
-// 		return 0, err
-// 	}
-// 	delta := c.Missing(r.prev)
-// 	r.prev = c
-// 	if delta > 0 {
-// 		return 0, MissingCaduError(delta)
-// 	}
-// 	if err := r.prev.Error; err != nil {
-// 		return 0, err
-// 	}
-// 	n := copy(bs, vs)
-// 	if n < caduPacketLen {
-// 		return n, io.ErrShortBuffer
-// 	}
-// 	return n, nil
-// }
+func (r *vcduReader) readSingle(bs []byte) (int, error) {
+	vs := make([]byte, caduPacketLen+r.skip)
+	n, err := r.inner.Read(vs)
+	if err != nil {
+		return n, err
+	}
+	vs = vs[r.skip:]
+	if r.body {
+		vs = vs[caduHeaderLen : caduPacketLen-caduCheckLen]
+	}
+	return copy(bs, vs), nil
+}
 
 func DecodeCadu(r io.Reader) (*Cadu, error) {
 	bs := make([]byte, caduPacketLen)
@@ -143,7 +131,7 @@ func (c *Cadu) Missing(p *Cadu) uint32 {
 	if p.Sequence > c.Sequence {
 		return p.Missing(c)
 	}
-	if delta := (c.Sequence - p.Sequence) & 0xFFF; delta > 1 {
+	if delta := (c.Sequence - p.Sequence) & 0xFFFFFF; delta > 1 {
 		return delta
 	}
 	return 0

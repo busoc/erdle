@@ -9,7 +9,116 @@ import (
 	"time"
 )
 
-const hrdlHeaderSize = 12
+const (
+	hrdlHeaderLen  = 8
+	hrdlTrailerLen = 4
+	hrdlMetaLen    = hrdlHeaderLen + hrdlTrailerLen
+)
+
+type Builder struct {
+	Word        []byte
+	Order       binary.ByteOrder
+	KeepHeader  bool
+	KeepTrailer bool
+
+	inner  io.Reader
+	buffer []byte
+
+	digest hash.Hash32
+
+	count   int
+	size    int
+	written int
+}
+
+func NewBuilder(r io.Reader, hrdfe bool) *Builder {
+	if _, ok := r.(*vcduReader); !ok {
+		x := &vcduReader{
+			inner: r,
+			body:  true,
+		}
+		if hrdfe {
+			x.skip = 8
+		}
+		r = x
+	}
+	b := Builder{
+		inner:       r,
+		digest:      SumHRDL(),
+		Order:       binary.LittleEndian,
+		Word:        Word,
+		KeepTrailer: true,
+		KeepHeader:  true,
+	}
+	return &b
+}
+
+var null = []byte{0x00}
+
+func (b *Builder) Read(bs []byte) (int, error) {
+	written := copy(bs, bytes.TrimPrefix(b.buffer, null))
+	b.buffer = b.buffer[:0]
+	if ix := bytes.Index(bs[:written], b.Word); ix >= len(b.Word) {
+		b.digest.Reset()
+		b.size, b.written = 0, 0
+		b.buffer = append(b.buffer[:0], bs[ix:written]...)
+		return ix, nil
+	}
+	if b.size == 0 {
+		var offset int
+		for {
+			if ix := bytes.Index(bs[offset:written], b.Word); ix >= 0 {
+				b.count++
+				written = copy(bs, bs[offset+ix:written])
+				break
+			}
+			written = written % len(bs)
+			n, err := b.inner.Read(bs[written:])
+			if err != nil {
+				return 0, err
+			}
+			offset = written
+			if offset > 0 {
+				offset -= len(b.Word)
+			}
+			written += n
+		}
+		b.size = int(b.Order.Uint32(bs[4:])) + hrdlMetaLen
+		if ix := bytes.LastIndex(bs[:written], b.Word); ix >= len(b.Word) {
+			b.digest.Reset()
+			b.size, b.written = 0, 0
+			b.buffer = append(b.buffer, bs[ix:written]...)
+			return ix, nil
+		}
+	}
+
+	for written < len(bs) {
+		vs := make([]byte, caduBodyLen)
+		n, err := b.inner.Read(vs)
+		if err != nil {
+			return 0, err
+		}
+		offset := written - len(b.Word)
+		if offset < 0 {
+			offset = 0
+		}
+		if nn := copy(bs[written:], vs); nn < len(vs) {
+			b.buffer = append(b.buffer, vs[nn:]...)
+			written += nn
+		} else {
+			written += n
+		}
+		if ix := bytes.Index(bs[offset:written], b.Word); ix >= 0 {
+			b.digest.Reset()
+			b.size, b.written = 0, 0
+			b.buffer = append(b.buffer[:0], bs[offset+ix:written]...)
+			return offset + ix, nil
+		}
+	}
+	b.written += written
+	return written, nil
+
+}
 
 type HRDLHeader struct {
 	// HRDL Header Fields
@@ -145,14 +254,14 @@ type assembler struct {
 }
 
 const (
-	caduCounterLim = 1<<24
+	caduCounterLim  = 1 << 24
 	caduCounterMask = 0x0FFF
 )
 
 func Reassemble(r io.Reader, hrdfe bool) io.Reader {
 	rs := &assembler{
-		inner: bufio.NewReaderSize(r, 8<<20),
-		rest:  new(bytes.Buffer),
+		inner:   bufio.NewReaderSize(r, 8<<20),
+		rest:    new(bytes.Buffer),
 		counter: caduCounterLim,
 	}
 	if hrdfe {
@@ -212,13 +321,13 @@ func (r *assembler) copyHRDL(bs []byte) (int, error) {
 	r.rest.Write(bs[z:])
 
 	size := int(binary.LittleEndian.Uint32(bs[len(Word):]))
-	if s := size + hrdlHeaderSize; s > z {
+	if s := size + hrdlMetaLen; s > z {
 		return z, LengthError{Want: s, Got: z}
 	}
-	if err := verifyHRDL(bs[:size+hrdlHeaderSize]); err != nil {
+	if err := verifyHRDL(bs[:size+hrdlMetaLen]); err != nil {
 		return z, err
 	}
-	return size + hrdlHeaderSize, nil
+	return size + hrdlMetaLen, nil
 }
 
 func verifyHRDL(bs []byte) error {
