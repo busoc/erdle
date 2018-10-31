@@ -46,11 +46,11 @@ func init() {
 }
 
 func main() {
-	defer func() {
-		if err := recover(); err != nil {
-			log.Fatalf("unexpected error: %s", err)
-		}
-	}()
+	// defer func() {
+	// 	if err := recover(); err != nil {
+	// 		log.Fatalf("unexpected error: %s", err)
+	// 	}
+	// }()
 	sort.Slice(commands, func(i, j int) bool { return commands[i].String() < commands[j].String() })
 	usage := func() {
 		data := struct {

@@ -55,7 +55,7 @@ func NewReader(r io.Reader, hrdfe bool) io.Reader {
 
 func (r *vcduReader) Read(bs []byte) (int, error) {
 	var n int
-	for n < len(bs) {
+	for n+caduBodyLen <= len(bs) {
 		nn, err := r.readSingle(bs[n:])
 		if err != nil {
 			return n, err

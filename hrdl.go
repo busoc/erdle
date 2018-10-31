@@ -42,9 +42,10 @@ func NewBuilder(r io.Reader, hrdfe bool) *Builder {
 		}
 		r = x
 	}
+	digest := SumHRDL()
 	b := Builder{
-		inner:       r,
-		digest:      SumHRDL(),
+		inner:       io.TeeReader(r, digest),
+		digest:      digest,
 		Order:       binary.LittleEndian,
 		Word:        Word,
 		KeepTrailer: true,
@@ -56,68 +57,69 @@ func NewBuilder(r io.Reader, hrdfe bool) *Builder {
 var null = []byte{0x00}
 
 func (b *Builder) Read(bs []byte) (int, error) {
-	written := copy(bs, bytes.TrimPrefix(b.buffer, null))
+	var (
+		offset  int
+		written int
+	)
+
+	written = copy(bs, b.buffer)
 	b.buffer = b.buffer[:0]
-	if ix := bytes.Index(bs[:written], b.Word); ix >= len(b.Word) {
-		b.digest.Reset()
-		b.size, b.written = 0, 0
-		b.buffer = append(b.buffer[:0], bs[ix:written]...)
-		return ix, nil
-	}
 	if b.size == 0 {
-		var offset int
 		for {
+			if offset > len(b.Word) {
+				offset -= len(b.Word)
+			}
 			if ix := bytes.Index(bs[offset:written], b.Word); ix >= 0 {
-				b.count++
 				written = copy(bs, bs[offset+ix:written])
+				offset = written
+				b.count++
 				break
 			}
-			written = written % len(bs)
-			n, err := b.inner.Read(bs[written:])
+			if written+caduBodyLen > len(bs) {
+				written = copy(bs, bs[written-len(b.Word):written])
+			}
+			n, err := b.inner.Read(bs[written : written+caduBodyLen])
 			if err != nil {
 				return 0, err
 			}
 			offset = written
-			if offset > 0 {
-				offset -= len(b.Word)
-			}
 			written += n
 		}
-		b.size = int(b.Order.Uint32(bs[4:])) + hrdlMetaLen
 		if ix := bytes.LastIndex(bs[:written], b.Word); ix >= len(b.Word) {
-			b.digest.Reset()
 			b.size, b.written = 0, 0
-			b.buffer = append(b.buffer, bs[ix:written]...)
+			b.digest.Reset()
+			b.buffer = append(b.buffer[:0], bs[ix:written]...)
 			return ix, nil
 		}
+		b.size = int(b.Order.Uint32(bs[4:])) + hrdlMetaLen
 	}
 
-	for written < len(bs) {
-		vs := make([]byte, caduBodyLen)
-		n, err := b.inner.Read(vs)
-		if err != nil {
-			return 0, err
-		}
-		offset := written - len(b.Word)
-		if offset < 0 {
-			offset = 0
-		}
-		if nn := copy(bs[written:], vs); nn < len(vs) {
-			b.buffer = append(b.buffer, vs[nn:]...)
-			written += nn
-		} else {
-			written += n
+	for written+caduBodyLen < len(bs) {
+		if offset >= len(b.Word) {
+			offset -= len(b.Word)
 		}
 		if ix := bytes.Index(bs[offset:written], b.Word); ix >= 0 {
-			b.digest.Reset()
 			b.size, b.written = 0, 0
+			b.digest.Reset()
 			b.buffer = append(b.buffer[:0], bs[offset+ix:written]...)
 			return offset + ix, nil
 		}
+		n, err := b.inner.Read(bs[written : written+caduBodyLen])
+		if err != nil {
+			return 0, err
+		}
+		offset = written
+		written += n
+		b.written += n
+	}
+	if ix := bytes.Index(bs[offset:written], b.Word); ix >= 0 {
+		b.size, b.written = 0, 0
+		b.digest.Reset()
+		b.buffer = append(b.buffer[:0], bs[offset+ix:written]...)
+		return offset + ix, nil
 	}
 	b.written += written
 	return written, nil
-
 }
 
 type HRDLHeader struct {
