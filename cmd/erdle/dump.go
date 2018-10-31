@@ -154,8 +154,8 @@ func dumpHRDL(r io.Reader, hrdfe bool) error {
 		case err == io.EOF:
 			return nil
 		case err != nil && erdle.IsErdleError(err):
-			log.Println(err)
-			continue
+			// log.Println(err)
+			// continue
 		case err != nil && !erdle.IsErdleError(err):
 			return err
 		}

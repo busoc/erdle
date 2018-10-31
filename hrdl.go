@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"hash"
 	"io"
 	"time"
 )
+
+var ErrFull = errors.New("complete")
 
 const (
 	hrdlHeaderLen  = 8
@@ -42,10 +45,8 @@ func NewBuilder(r io.Reader, hrdfe bool) *Builder {
 		}
 		r = x
 	}
-	digest := SumHRDL()
 	b := Builder{
-		inner:       io.TeeReader(r, digest),
-		digest:      digest,
+		inner:       r,
 		Order:       binary.LittleEndian,
 		Word:        Word,
 		KeepTrailer: true,
@@ -53,8 +54,6 @@ func NewBuilder(r io.Reader, hrdfe bool) *Builder {
 	}
 	return &b
 }
-
-var null = []byte{0x00}
 
 func (b *Builder) Read(bs []byte) (int, error) {
 	var (
@@ -85,8 +84,16 @@ func (b *Builder) Read(bs []byte) (int, error) {
 			offset = written
 			written += n
 		}
-		if ix := b.isFull(bs[len(b.Word):written]); ix >= 0 {
-			return len(b.Word) + ix, nil
+		if ix, err := b.isFull(bs[len(b.Word):written]); ix >= 0 {
+			return len(b.Word) + ix, err
+		}
+		if written < hrdlHeaderLen {
+			n, err := b.inner.Read(bs[written : written+caduBodyLen])
+			if err != nil {
+				return 0, err
+			}
+			written += n
+			offset = written
 		}
 		b.size = int(b.Order.Uint32(bs[4:])) + hrdlMetaLen
 	}
@@ -95,8 +102,8 @@ func (b *Builder) Read(bs []byte) (int, error) {
 		if offset >= len(b.Word) {
 			offset -= len(b.Word)
 		}
-		if ix := b.isFull(bs[offset:written]); ix >= 0 {
-			return offset + ix, nil
+		if ix, err := b.isFull(bs[offset:written]); ix >= 0 {
+			return offset + ix, err
 		}
 		n, err := b.inner.Read(bs[written : written+caduBodyLen])
 		if err != nil {
@@ -106,37 +113,91 @@ func (b *Builder) Read(bs []byte) (int, error) {
 		written += n
 		b.written += n
 	}
-	if ix := b.isFull(bs[offset:written]); ix >= 0 {
-		return offset + ix, nil
+	if ix, err := b.isFull(bs[offset:written]); ix >= 0 {
+		return offset + ix, err
 	}
-	b.written += written
 	return written, nil
 }
 
-func (b *Builder) isFull(bs []byte) int {
+func (b *Builder) isFull(bs []byte) (int, error) {
 	ix := bytes.Index(bs, b.Word)
 	if ix < 0 {
-		return ix
+		return ix, nil
 	}
 	b.size, b.written = 0, 0
-	b.digest.Reset()
 	b.buffer = append(b.buffer[:0], bs[ix:]...)
-	return ix
+	return ix, ErrFull
 }
 
 type Decoder struct {
-	inner io.Reader
+	inner  io.Reader
+	buffer []byte
 }
 
 func NewDecoder(r io.Reader, hrdfe bool) *Decoder {
 	if _, ok := r.(*Builder); !ok {
 		r = NewBuilder(r, hrdfe)
 	}
-	return &Decoder{inner: r}
+	return &Decoder{
+		inner:  r,
+		buffer: make([]byte, 8<<20),
+	}
 }
 
 func (d *Decoder) Decode() (*Erdle, error) {
-	return nil, nil
+	n, err := d.inner.Read(d.buffer)
+	switch err {
+	case ErrFull, nil:
+		err = nil
+	default:
+		return nil, err
+	}
+	rs := bytes.NewReader(d.buffer[:n])
+	h := decodeHRDLHeader(rs)
+
+	e := Erdle{
+		HRDLHeader: h,
+		Payload:    make([]byte, rs.Len()-hrdlTrailerLen),
+	}
+	if _, err := io.ReadFull(rs, e.Payload); err != nil {
+		return nil, err
+	}
+	binary.Read(rs, binary.LittleEndian, &e.Control)
+	if uint32(n) != h.Size+hrdlMetaLen {
+		err = LengthError{Want: int(h.Size), Got: int(n)}
+	}
+	return &e, err
+}
+
+func decodeHRDLHeader(rs io.Reader) *HRDLHeader {
+	var h HRDLHeader
+
+	var (
+		spare  uint16
+		fine   uint16
+		coarse uint32
+	)
+	binary.Read(rs, binary.LittleEndian, &h.Sync)
+	binary.Read(rs, binary.LittleEndian, &h.Size)
+
+	binary.Read(rs, binary.LittleEndian, &h.Channel)
+	binary.Read(rs, binary.LittleEndian, &h.Source)
+	binary.Read(rs, binary.LittleEndian, &spare)
+	binary.Read(rs, binary.LittleEndian, &h.Sequence)
+	binary.Read(rs, binary.LittleEndian, &coarse)
+	binary.Read(rs, binary.LittleEndian, &fine)
+	binary.Read(rs, binary.LittleEndian, &spare)
+
+	h.When = readTime6(coarse, fine)
+
+	binary.Read(rs, binary.LittleEndian, &h.Property)
+	binary.Read(rs, binary.LittleEndian, &h.Stream)
+	binary.Read(rs, binary.LittleEndian, &h.Counter)
+	binary.Read(rs, binary.LittleEndian, &h.Acqtime)
+	binary.Read(rs, binary.LittleEndian, &h.Auxtime)
+	binary.Read(rs, binary.LittleEndian, &h.Origin)
+
+	return &h
 }
 
 type HRDLHeader struct {

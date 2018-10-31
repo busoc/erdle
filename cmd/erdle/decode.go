@@ -1,9 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"crypto/md5"
-	"encoding/binary"
 	"io"
 	"log"
 	"os"
@@ -19,33 +16,50 @@ var decodeCommand = &cli.Command{
 }
 
 func runDecode(cmd *cli.Command, args []string) error {
-	size := cmd.Flag.Int("s", 8<<20, "size")
+	const row = "%6d | %7d | %02x | %s | %9d | %s | %s | %02x | %s | %7d | %16s | %s"
+
 	hrdfe := cmd.Flag.Bool("e", false, "hrdfe")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	buffer := make([]byte, *size)
-	var i int
+	var sid int
+	logger := log.New(os.Stdout, "", 0)
 	for _, p := range cmd.Flag.Args() {
 		r, err := os.Open(p)
 		if err != nil {
 			return err
 		}
-		hr := erdle.NewBuilder(r, *hrdfe)
+		d := erdle.NewDecoder(r, *hrdfe)
+	Loop:
 		for {
-			n, err := hr.Read(buffer)
-			if err == io.EOF {
-				break
-			}
-			if err != nil && err != io.EOF {
+			e, err := d.Decode()
+			switch {
+			case err == io.EOF:
+				break Loop
+			// case err != nil && erdle.IsErdleError(err):
+			case err != nil && !erdle.IsErdleError(err):
 				return err
+			default:
 			}
-			if bytes.Equal(buffer[:4], erdle.Word) {
-				i++
-				xxx := md5.Sum(buffer[:n])
-				s := binary.LittleEndian.Uint32(buffer[4:])
-				log.Printf("got %7d ==> %7d (%d) %x %x %x", i, s, n, buffer[:8], buffer[8:24], xxx)
+			h := e.HRDLHeader
+			at := GPS.Add(h.Acqtime).Format("2006-01-02 15:04:05.000")
+			xt := GPS.Add(h.Auxtime).Format("15:04:05.000")
+			vt := e.When.Add(Delta).Format("2006-01-02 15:04:05.000")
+
+			errtype := "-"
+			switch {
+			case erdle.IsInvalidLength(err):
+				errtype = "bad length"
+			case erdle.IsInvalidSum(err):
+				errtype = "bad sum"
+			default:
 			}
+			mode := "realtime"
+			if h.Source != h.Origin {
+				mode = "playback"
+			}
+			sid++
+			logger.Printf(row, sid, h.Size, h.Channel, vt, h.Sequence, at, xt, h.Origin, mode, h.Counter, h.UPI, errtype)
 		}
 		r.Close()
 	}

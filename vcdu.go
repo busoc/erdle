@@ -57,10 +57,10 @@ func (r *vcduReader) Read(bs []byte) (int, error) {
 	var n int
 	for n+caduBodyLen <= len(bs) {
 		nn, err := r.readSingle(bs[n:])
+		n += nn
 		if err != nil {
 			return n, err
 		}
-		n += nn
 	}
 	return n, nil
 }
