@@ -65,6 +65,8 @@ func (r *vcduReader) Read(bs []byte) (int, error) {
 	return n, nil
 }
 
+var empty = make([]byte, caduBodyLen)
+
 func (r *vcduReader) readSingle(bs []byte) (int, error) {
 	vs := make([]byte, caduPacketLen+r.skip)
 	n, err := r.inner.Read(vs)
@@ -74,6 +76,9 @@ func (r *vcduReader) readSingle(bs []byte) (int, error) {
 	vs = vs[r.skip:]
 	if r.body {
 		vs = vs[caduHeaderLen : caduPacketLen-caduCheckLen]
+		// if bytes.Equal(vs, empty) {
+		// 	return r.readSingle(bs)
+		// }
 	}
 	return copy(bs, vs), nil
 }

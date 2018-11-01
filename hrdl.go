@@ -68,6 +68,7 @@ func (b *Builder) Read(bs []byte) (int, error) {
 			if offset > len(b.Word) {
 				offset -= len(b.Word)
 			}
+			offset = 0
 			if ix := bytes.Index(bs[offset:written], b.Word); ix >= 0 {
 				written = copy(bs, bs[offset+ix:written])
 				offset = written
@@ -84,10 +85,7 @@ func (b *Builder) Read(bs []byte) (int, error) {
 			offset = written
 			written += n
 		}
-		if ix, err := b.isFull(bs[len(b.Word):written]); ix >= 0 {
-			return len(b.Word) + ix, err
-		}
-		if written < hrdlHeaderLen {
+		if written < hrdlHeaderLen+16 {
 			n, err := b.inner.Read(bs[written : written+caduBodyLen])
 			if err != nil {
 				return 0, err
@@ -95,7 +93,11 @@ func (b *Builder) Read(bs []byte) (int, error) {
 			written += n
 			offset = written
 		}
+		b.written = written
 		b.size = int(b.Order.Uint32(bs[4:])) + hrdlMetaLen
+		if ix, err := b.isFull(bs[len(b.Word):written]); ix >= 0 {
+			return len(b.Word) + ix, err
+		}
 	}
 
 	for written+caduBodyLen < len(bs) {
@@ -112,21 +114,37 @@ func (b *Builder) Read(bs []byte) (int, error) {
 		offset = written
 		written += n
 		b.written += n
+		if diff := b.written - b.size; b.written >= b.size {
+			b.reset(bs[written-diff : written])
+			return written - diff, ErrFull
+		}
 	}
 	if ix, err := b.isFull(bs[offset:written]); ix >= 0 {
 		return offset + ix, err
 	}
+	if diff := b.written - b.size; b.written >= b.size {
+		b.reset(bs[written-diff : written])
+		return written - diff, ErrFull
+	}
 	return written, nil
 }
+
+var null = []byte{0x00}
 
 func (b *Builder) isFull(bs []byte) (int, error) {
 	ix := bytes.Index(bs, b.Word)
 	if ix < 0 {
 		return ix, nil
 	}
-	b.size, b.written = 0, 0
-	b.buffer = append(b.buffer[:0], bs[ix:]...)
+	b.reset(bs[ix:])
 	return ix, ErrFull
+}
+
+func (b *Builder) reset(bs []byte) {
+	b.size, b.written = 0, 0
+	if len(bs) > 0 {
+		b.buffer = append(b.buffer[:0], bs...)
+	}
 }
 
 type Decoder struct {
@@ -196,6 +214,29 @@ func decodeHRDLHeader(rs io.Reader) *HRDLHeader {
 	binary.Read(rs, binary.LittleEndian, &h.Acqtime)
 	binary.Read(rs, binary.LittleEndian, &h.Auxtime)
 	binary.Read(rs, binary.LittleEndian, &h.Origin)
+
+	switch h.Property >> 4 {
+	case 1:
+		h.UPI = "SCIENCE"
+		bs := make([]byte, 32)
+		if _, err := rs.Read(bs); err != nil {
+			// return nil, err
+		}
+		if u := string(bytes.Trim(bs, "\x00")); len(u) > 0 {
+			h.UPI = u
+		}
+	case 2:
+		h.UPI = "IMAGE"
+		bs := make([]byte, 52)
+		if _, err := rs.Read(bs); err != nil {
+			// return nil, err
+		}
+		if u := string(bytes.Trim(bs[20:], "\x00")); len(u) > 0 {
+			h.UPI = u
+		}
+	default:
+		h.UPI = "UNKNOWN"
+	}
 
 	return &h
 }
