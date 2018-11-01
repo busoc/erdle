@@ -25,6 +25,7 @@ var commands = []*cli.Command{
 	replayCommand,
 	countCommand,
 	decodeCommand,
+	debugCommand,
 }
 
 const helpText = `{{.Name}} reports various information about vcdu and/or hrdl packets
