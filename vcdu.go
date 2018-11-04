@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"hash"
 	"io"
+	// "log"
 	"time"
 )
 
@@ -14,10 +15,12 @@ const (
 )
 
 const (
-	caduHeaderLen = 14
-	caduCheckLen  = 2
-	caduPacketLen = 1024
-	caduBodyLen   = caduPacketLen - caduHeaderLen - caduCheckLen
+	caduHeaderLen    = 14
+	caduCheckLen     = 2
+	caduPacketLen    = 1024
+	caduBodyLen      = caduPacketLen - caduHeaderLen - caduCheckLen
+	caduCounterLimit = 1 << 24
+	// caduCounterMask = caduCounterLimit-1
 )
 
 type VCDUHeader struct {
@@ -43,6 +46,8 @@ type vcduReader struct {
 	inner io.Reader
 	skip  int
 	body  bool
+
+	counter uint32
 }
 
 func NewReader(r io.Reader, hrdfe bool) io.Reader {
@@ -50,7 +55,11 @@ func NewReader(r io.Reader, hrdfe bool) io.Reader {
 	if hrdfe {
 		skip = 8
 	}
-	return &vcduReader{inner: r, skip: skip}
+	return &vcduReader{
+		inner:   r,
+		skip:    skip,
+		counter: caduCounterLimit,
+	}
 }
 
 func (r *vcduReader) Read(bs []byte) (int, error) {
@@ -74,6 +83,11 @@ func (r *vcduReader) readSingle(bs []byte) (int, error) {
 		return n, err
 	}
 	vs = vs[r.skip:]
+	curr := binary.BigEndian.Uint32(vs[6:]) >> 8
+	// if diff := curr - r.counter; diff != curr && diff > 1 {
+	// 	log.Printf("%d missing packets (%d - %d)", diff, r.counter, curr)
+	// }
+	r.counter = curr
 	if r.body {
 		vs = vs[caduHeaderLen : caduPacketLen-caduCheckLen]
 		// if bytes.Equal(vs, empty) {

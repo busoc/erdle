@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"os"
 
 	"github.com/busoc/erdle"
@@ -98,21 +99,68 @@ func runDecode(cmd *cli.Command, args []string) error {
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
+	switch proto, addr := protoFromAddr(cmd.Flag.Arg(0)); proto {
+	case "udp", "UDP":
+		return decodeFromUDP(addr)
+	case "tcp", "TCP":
+		return decodeFromTCP(addr)
+	default:
+		return decodeFromFiles(cmd.Flag.Args(), *summary, *hrdfe)
+	}
+}
+
+func decodeFromTCP(addr string) error {
+	c, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for {
+		c, err := c.Accept()
+		if err != nil {
+			return err
+		}
+		go func(r io.ReadCloser) {
+			defer r.Close()
+			decodeHRDLPackets(os.Stdout, r, false, 0)
+		}(c)
+	}
+	return nil
+}
+
+func decodeFromUDP(addr string) error {
+	a, err := net.ResolveUDPAddr("udp", addr)
+	if err != nil {
+		return err
+	}
+	c, err := net.ListenUDP("udp", a)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	count, invalid, size, err := decodeHRDLPackets(os.Stdout, c, false, 0)
+	fmt.Printf("%d HRDL packets (%dKB - %d invalid)", count, size>>10, invalid)
+	fmt.Println()
+	return err
+}
+
+func decodeFromFiles(ps []string, summary, hrdfe bool) error {
 	var (
 		count   int
 		invalid int
 		size    int
 	)
 	var w io.Writer = os.Stdout
-	if *summary {
+	if summary {
 		w = ioutil.Discard
 	}
-	for _, p := range cmd.Flag.Args() {
+	for _, p := range ps {
 		r, err := os.Open(p)
 		if err != nil {
 			return err
 		}
-		if c, i, s, err := decodeHRDLPackets(w, r, *hrdfe, count); err != nil {
+		if c, i, s, err := decodeHRDLPackets(w, r, hrdfe, count); err != nil {
 			return err
 		} else {
 			count = c
@@ -121,7 +169,7 @@ func runDecode(cmd *cli.Command, args []string) error {
 		}
 		r.Close()
 	}
-	if !*summary {
+	if !summary {
 		fmt.Println()
 	}
 	fmt.Printf("%d HRDL packets (%dKB - %d invalid)", count, size>>10, invalid)
