@@ -152,14 +152,18 @@ type Decoder struct {
 	buffer []byte
 }
 
-func NewDecoder(r io.Reader, hrdfe bool) *Decoder {
-	if _, ok := r.(*Builder); !ok {
-		r = NewBuilder(r, hrdfe)
-	}
+func HRDL(r io.Reader) *Decoder {
 	return &Decoder{
 		inner:  r,
 		buffer: make([]byte, 8<<20),
 	}
+}
+
+func NewDecoder(r io.Reader, hrdfe bool) *Decoder {
+	if _, ok := r.(*Builder); !ok {
+		r = NewBuilder(r, hrdfe)
+	}
+	return HRDL(r)
 }
 
 func (d *Decoder) Decode() (*Erdle, error) {
@@ -175,7 +179,7 @@ func (d *Decoder) Decode() (*Erdle, error) {
 
 	e := Erdle{
 		HRDLHeader: h,
-		Payload:    make([]byte, rs.Len()-hrdlTrailerLen),
+		Payload:    make([]byte, rs.Len()-hrdlMetaLen),
 	}
 	if _, err := io.ReadFull(rs, e.Payload); err != nil {
 		return nil, err
@@ -237,7 +241,6 @@ func decodeHRDLHeader(rs io.Reader) *HRDLHeader {
 	default:
 		h.UPI = "UNKNOWN"
 	}
-
 	return &h
 }
 

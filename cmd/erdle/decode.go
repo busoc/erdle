@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net"
 	"os"
 
@@ -94,6 +95,7 @@ func debugHRDLPackets(r io.Reader, sid, size int) (int, error) {
 }
 
 func runDecode(cmd *cli.Command, args []string) error {
+	convert := cmd.Flag.Bool("c", false, "convert")
 	summary := cmd.Flag.Bool("s", false, "summary")
 	hrdfe := cmd.Flag.Bool("e", false, "hrdfe")
 	if err := cmd.Flag.Parse(args); err != nil {
@@ -101,15 +103,15 @@ func runDecode(cmd *cli.Command, args []string) error {
 	}
 	switch proto, addr := protoFromAddr(cmd.Flag.Arg(0)); proto {
 	case "udp", "UDP":
-		return decodeFromUDP(addr)
+		return decodeFromUDP(addr, *convert)
 	case "tcp", "TCP":
-		return decodeFromTCP(addr)
+		return decodeFromTCP(addr, *convert)
 	default:
 		return decodeFromFiles(cmd.Flag.Args(), *summary, *hrdfe)
 	}
 }
 
-func decodeFromTCP(addr string) error {
+func decodeFromTCP(addr string, convert bool) error {
 	c, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -122,13 +124,22 @@ func decodeFromTCP(addr string) error {
 		}
 		go func(r io.ReadCloser) {
 			defer r.Close()
-			decodeHRDLPackets(os.Stdout, r, false, 0)
+
+			var d *erdle.Decoder
+			if convert {
+				d = erdle.NewDecoder(r, false)
+			} else {
+				d = erdle.HRDL(r)
+			}
+			if _, _, _, err := decodeHRDLPackets(d, os.Stdout, 0); err != nil {
+				log.Fatalln(err)
+			}
 		}(c)
 	}
 	return nil
 }
 
-func decodeFromUDP(addr string) error {
+func decodeFromUDP(addr string, convert bool) error {
 	a, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
 		return err
@@ -139,7 +150,13 @@ func decodeFromUDP(addr string) error {
 	}
 	defer c.Close()
 
-	count, invalid, size, err := decodeHRDLPackets(os.Stdout, c, false, 0)
+	var d *erdle.Decoder
+	if convert {
+		d = erdle.NewDecoder(c, false)
+	} else {
+		d = erdle.HRDL(c)
+	}
+	count, invalid, size, err := decodeHRDLPackets(d, os.Stdout, 0)
 	fmt.Printf("%d HRDL packets (%dKB - %d invalid)", count, size>>10, invalid)
 	fmt.Println()
 	return err
@@ -160,7 +177,8 @@ func decodeFromFiles(ps []string, summary, hrdfe bool) error {
 		if err != nil {
 			return err
 		}
-		if c, i, s, err := decodeHRDLPackets(w, r, hrdfe, count); err != nil {
+		d := erdle.NewDecoder(r, hrdfe)
+		if c, i, s, err := decodeHRDLPackets(d, w, count); err != nil {
 			return err
 		} else {
 			count = c
@@ -177,10 +195,9 @@ func decodeFromFiles(ps []string, summary, hrdfe bool) error {
 	return nil
 }
 
-func decodeHRDLPackets(w io.Writer, r io.Reader, hrdfe bool, sid int) (int, int, int, error) {
+func decodeHRDLPackets(d *erdle.Decoder, w io.Writer, sid int) (int, int, int, error) {
 	const row = "%6d | %7d | %02x | %s | %9d | %8d | %s | %s | %02x | %s | %7d | %16s | %s\n"
 
-	d := erdle.NewDecoder(r, hrdfe)
 	var size, invalid int
 	cs := make(map[uint8]uint32)
 	for {

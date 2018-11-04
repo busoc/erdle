@@ -55,6 +55,9 @@ func IsErdleError(err error) bool {
 	if err == nil {
 		return false
 	}
+	if err == ErrFull {
+		return true
+	}
 	switch err.(type) {
 	default:
 		return false

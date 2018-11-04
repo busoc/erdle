@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -9,7 +8,6 @@ import (
 
 	"github.com/busoc/erdle"
 	"github.com/midbel/cli"
-	"github.com/midbel/rustine/sum"
 )
 
 const (
@@ -18,15 +16,14 @@ const (
 )
 
 var relayCommand = &cli.Command{
-	Usage: "relay <local> <remote>",
+	Usage: "relay [-d] <local> <remote>",
 	Short: "",
 	Run:   runRelay,
 }
 
-type relayFunc func(string, string, string, int) error
+type relayFunc func(string, string, string) error
 
 func runRelay(cmd *cli.Command, args []string) error {
-	mode := cmd.Flag.Int("i", -1, "instance")
 	proxy := cmd.Flag.String("d", "", "proxy packets to")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
@@ -41,16 +38,11 @@ func runRelay(cmd *cli.Command, args []string) error {
 	default:
 		return fmt.Errorf("unsupported protocol %s", proto)
 	}
-	switch *mode {
-	case -1, 0, 1, 2, 255:
-	default:
-		return fmt.Errorf("unsupported instance")
-	}
 
-	return relay(addr, cmd.Flag.Arg(1), *proxy, *mode)
+	return relay(addr, cmd.Flag.Arg(1), *proxy)
 }
 
-func relayTCP(local, remote, proxy string, mode int) error {
+func relayTCP(local, remote, proxy string) error {
 	c, err := net.Listen("tcp", local)
 	if err != nil {
 		return err
@@ -71,14 +63,14 @@ func relayTCP(local, remote, proxy string, mode int) error {
 				r.Close()
 				w.Close()
 			}()
-			if err := Relay(w, r, mode, proxy); err != nil {
+			if err := Relay(w, r, proxy); err != nil {
 				log.Println(err)
 			}
 		}(r, w)
 	}
 }
 
-func relayUDP(local, remote, proxy string, mode int) error {
+func relayUDP(local, remote, proxy string) error {
 	w, err := net.Dial(protoFromAddr(remote))
 	if err != nil {
 		return err
@@ -95,59 +87,39 @@ func relayUDP(local, remote, proxy string, mode int) error {
 	}
 	defer r.Close()
 
-	return Relay(w, r, mode, proxy)
+	return Relay(w, r, proxy)
 }
 
-func Relay(w io.Writer, r io.Reader, mode int, proxy string) error {
+func Relay(w io.Writer, r io.Reader, proxy string) error {
 	if x, err := net.Dial(protoFromAddr(proxy)); err == nil {
 		defer x.Close()
 		r = io.TeeReader(r, x)
 	}
-	a := erdle.Reassemble(r, false)
-	var p uint16
-	switch mode {
-	case 0, 1, 2, 255:
-		p = uint16(hdkVersion)<<12 | uint16(vmuVersion)<<8 | uint16(mode)
-	default:
+	ws := HRDL(w)
+	rs := erdle.NewBuilder(r, false)
+	buffer := make([]byte, 32<<10)
+	for i := 1; ; i++ {
+		n, err := io.CopyBuffer(ws, rs, buffer)
+		if !erdle.IsErdleError(err) {
+			return err
+		}
+		errmsg := "no error"
+		if err != nil && err != erdle.ErrFull {
+			errmsg = err.Error()
+		}
+		log.Printf("%d packet decoded (%d bytes): %s", i, n, errmsg)
 	}
-	rs := &relayReader{a}
-	ws := &relayWriter{w: w, version: p}
-	_, err := io.CopyBuffer(ws, rs, make([]byte, 8<<20))
-	return err
+	return nil
 }
 
-type relayWriter struct {
-	w       io.Writer
-	version uint16
-	counter uint16
+type hrdlRelayer struct {
+	w io.Writer
 }
 
-func (w *relayWriter) Write(bs []byte) (int, error) {
-	if w.version != 0 {
-		vs := make([]byte, len(bs)+14)
-
-		copy(vs, bs[:4])
-		binary.BigEndian.PutUint16(vs[4:], w.version)
-		binary.BigEndian.PutUint16(vs[6:], w.counter)
-		binary.BigEndian.PutUint32(vs[8:], uint32(len(bs)-8))
-		n := copy(vs[12:], bs[8:])
-		binary.BigEndian.PutUint16(vs[12+n:], sum.Sum1071(bs[8:]))
-
-		w.counter++
-		_, err := w.w.Write(vs)
-		return len(bs), err
-	} else {
-		return w.w.Write(bs)
-	}
+func HRDL(w io.Writer) io.Writer {
+	return &hrdlRelayer{w: w}
 }
 
-type relayReader struct{ inner io.Reader }
-
-func (r *relayReader) Read(bs []byte) (int, error) {
-	if n, err := r.inner.Read(bs); erdle.IsErdleError(err) {
-		log.Println("==>", err)
-		return 0, nil
-	} else {
-		return n, err
-	}
+func (r *hrdlRelayer) Write(bs []byte) (int, error) {
+	return r.w.Write(bs)
 }
