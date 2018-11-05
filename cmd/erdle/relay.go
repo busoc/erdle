@@ -24,9 +24,10 @@ var relayCommand = &cli.Command{
 	Run:   runRelay,
 }
 
-type relayFunc func(string, string, string, string) error
+type relayFunc func(string, string, string, string, int) error
 
 func runRelay(cmd *cli.Command, args []string) error {
+	buffer := cmd.Flag.Int("b", 32<<10, "buffer size")
 	mode := cmd.Flag.String("m", "", "mode")
 	proxy := cmd.Flag.String("d", "", "proxy packets to")
 	if err := cmd.Flag.Parse(args); err != nil {
@@ -43,10 +44,10 @@ func runRelay(cmd *cli.Command, args []string) error {
 		return fmt.Errorf("unsupported protocol %s", proto)
 	}
 
-	return relay(addr, cmd.Flag.Arg(1), *proxy, *mode)
+	return relay(addr, cmd.Flag.Arg(1), *proxy, *mode, *buffer)
 }
 
-func relayTCP(local, remote, proxy, mode string) error {
+func relayTCP(local, remote, proxy, mode string, size int) error {
 	c, err := net.Listen("tcp", local)
 	if err != nil {
 		return err
@@ -67,14 +68,14 @@ func relayTCP(local, remote, proxy, mode string) error {
 				r.Close()
 				w.Close()
 			}()
-			if err := Relay(w, r, proxy, mode); err != nil {
+			if err := Relay(w, r, proxy, mode, size); err != nil {
 				log.Println(err)
 			}
 		}(r, w)
 	}
 }
 
-func relayUDP(local, remote, proxy, mode string) error {
+func relayUDP(local, remote, proxy, mode string, size int) error {
 	w, err := net.Dial(protoFromAddr(remote))
 	if err != nil {
 		return err
@@ -91,10 +92,10 @@ func relayUDP(local, remote, proxy, mode string) error {
 	}
 	defer r.Close()
 
-	return Relay(w, r, proxy, mode)
+	return Relay(w, r, proxy, mode, size)
 }
 
-func Relay(w io.Writer, r io.Reader, proxy, mode string) error {
+func Relay(w io.Writer, r io.Reader, proxy, mode string, size int) error {
 	if x, err := net.Dial(protoFromAddr(proxy)); err == nil {
 		defer x.Close()
 		r = io.TeeReader(r, x)
@@ -103,7 +104,7 @@ func Relay(w io.Writer, r io.Reader, proxy, mode string) error {
 	switch mode {
 	case "", "raw", "hrdl":
 		ws := HRDL(w)
-		buffer := make([]byte, 32<<10)
+		buffer := make([]byte, size)
 		for i := 1; ; i++ {
 			n, err := io.CopyBuffer(ws, rs, buffer)
 			if !erdle.IsErdleError(err) {
@@ -116,7 +117,7 @@ func Relay(w io.Writer, r io.Reader, proxy, mode string) error {
 			log.Printf("HRDL packet (%d) decoded (%d bytes): %s", i, n, errmsg)
 		}
 	case "hdk", "hadock":
-		ws := Hadock(w, 4<<10)
+		ws := Hadock(w, size)
 		for i := 1; ; i++ {
 			_, err := io.Copy(ws, rs)
 			if !erdle.IsErdleError(err) {
