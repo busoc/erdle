@@ -37,9 +37,9 @@ type Builder struct {
 func NewBuilder(r io.Reader, hrdfe bool) *Builder {
 	if _, ok := r.(*vcduReader); !ok {
 		x := &vcduReader{
-			inner: r,
-			body:  true,
-			buffer : make([]byte, caduPacketLen),
+			inner:  r,
+			body:   true,
+			buffer: make([]byte, caduPacketLen),
 		}
 		if hrdfe {
 			x.skip = 8

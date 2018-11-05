@@ -60,7 +60,7 @@ func NewReader(r io.Reader, hrdfe bool) io.Reader {
 		inner:   r,
 		skip:    skip,
 		counter: 0,
-		buffer : make([]byte, caduPacketLen+skip),
+		buffer:  make([]byte, caduPacketLen+skip),
 	}
 }
 

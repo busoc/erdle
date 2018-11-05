@@ -133,24 +133,32 @@ func Relay(w io.Writer, r io.Reader, proxy, mode string, size int) error {
 
 type hadockRelayer struct {
 	io.Writer
+
 	buffer   []byte
-	preamble uint16
 	sequence uint16
 }
 
+const hdkHeaderLen = 12 // sync(4)+preamble(2)+sequence(2)+size(4)
+
 func Hadock(w io.Writer, size int) io.Writer {
+	preamble := uint16(hdkVersion)<<12 | uint16(vmuVersion)<<8 | uint16(hdkInstance)
+	buffer := make([]byte, hdkHeaderLen+size)
+
+	copy(buffer, erdle.Word)
+	binary.BigEndian.PutUint16(buffer[4:], preamble)
+
 	return &hadockRelayer{
-		Writer:   w,
-		buffer:   make([]byte, size),
-		preamble: uint16(hdkVersion)<<12 | uint16(vmuVersion)<<8 | uint16(hdkInstance),
+		Writer: w,
+		buffer: buffer,
 	}
 }
 
 func (hr *hadockRelayer) ReadFrom(r io.Reader) (int64, error) {
 	var n int64
 
+	buffer := make([]byte, len(hr.buffer)+2)
 	for {
-		nn, err := r.Read(hr.buffer)
+		nn, err := r.Read(hr.buffer[hdkHeaderLen:])
 		switch err {
 		case nil:
 		case erdle.ErrFull:
@@ -158,25 +166,22 @@ func (hr *hadockRelayer) ReadFrom(r io.Reader) (int64, error) {
 		default:
 			return n, err
 		}
-		var buffer []byte
-		if bytes.Equal(hr.buffer[:4], erdle.Word) {
-			size := binary.LittleEndian.Uint32(hr.buffer[4:]) + 4
+		if bytes.Equal(hr.buffer[hdkHeaderLen:hdkHeaderLen+4], erdle.Word) {
+			size := binary.LittleEndian.Uint32(hr.buffer[hdkHeaderLen+4:]) + 4
 
-			var buf bytes.Buffer
-			buf.Write(hr.buffer[:4])
-			binary.Write(&buf, binary.BigEndian, hr.preamble)
-			binary.Write(&buf, binary.BigEndian, hr.sequence)
-			binary.Write(&buf, binary.BigEndian, size)
-			buf.Write(hr.buffer[8:nn])
+			binary.BigEndian.PutUint16(hr.buffer[6:], hr.sequence)
+			binary.BigEndian.PutUint32(hr.buffer[8:], size)
 
-			buffer = buf.Bytes()
+			copy(buffer, hr.buffer[:hdkHeaderLen])
+			nn = copy(buffer[hdkHeaderLen:], hr.buffer[hdkHeaderLen+8:hdkHeaderLen+nn]) + hdkHeaderLen
 		} else {
-			buffer = hr.buffer[:nn]
+			nn = copy(buffer, hr.buffer[hdkHeaderLen:hdkHeaderLen+nn])
 		}
 		if err == erdle.ErrFull {
-			buffer = append(buffer, 0xFF, 0xFF)
+			binary.BigEndian.PutUint16(buffer[nn:], 0xFFFF)
+			nn += 2
 		}
-		if nn, err := hr.Write(buffer); err != nil {
+		if nn, err := hr.Write(buffer[:nn]); err != nil {
 			return n, err
 		} else {
 			n += int64(nn)
