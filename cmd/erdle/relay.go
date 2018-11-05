@@ -14,8 +14,8 @@ import (
 
 const (
 	hdkInstance = 0
-	hdkVersion = 0
-	vmuVersion = 2
+	hdkVersion  = 0
+	vmuVersion  = 2
 )
 
 var relayCommand = &cli.Command{
@@ -132,15 +132,15 @@ func Relay(w io.Writer, r io.Reader, proxy, mode string) error {
 
 type hadockRelayer struct {
 	io.Writer
-	buffer []byte
+	buffer   []byte
 	preamble uint16
 	sequence uint16
 }
 
 func Hadock(w io.Writer, size int) io.Writer {
 	return &hadockRelayer{
-		Writer: w,
-		buffer: make([]byte, size),
+		Writer:   w,
+		buffer:   make([]byte, size),
 		preamble: uint16(hdkVersion)<<12 | uint16(vmuVersion)<<8 | uint16(hdkInstance),
 	}
 }
@@ -159,7 +159,7 @@ func (hr *hadockRelayer) ReadFrom(r io.Reader) (int64, error) {
 		}
 		var buffer []byte
 		if bytes.Equal(hr.buffer[:4], erdle.Word) {
-			size := binary.LittleEndian.Uint32(hr.buffer[4:])+4
+			size := binary.LittleEndian.Uint32(hr.buffer[4:]) + 4
 
 			var buf bytes.Buffer
 			buf.Write(hr.buffer[:4])

@@ -49,7 +49,7 @@ func runReplay(cmd *cli.Command, args []string) error {
 	for {
 		_, err = io.CopyBuffer(w, r, vs)
 		log.Printf("%T %v", err, err)
-		if  !erdle.IsErdleError(err) {
+		if !erdle.IsErdleError(err) {
 			break
 		}
 	}
