@@ -83,17 +83,13 @@ func (r *vcduReader) readSingle(bs []byte) (int, error) {
 		return n, err
 	}
 	vs = vs[r.skip:]
-	curr := binary.BigEndian.Uint32(vs[6:]) >> 8
-	// if diff := curr - r.counter; diff != curr && diff > 1 {
-	// 	return MissingCaduError(diff)
-	// 	log.Printf("%d missing packets (%d - %d)", diff, r.counter, curr)
-	// }
-	r.counter = curr
+	prev := r.counter
+	r.counter = binary.BigEndian.Uint32(vs[6:]) >> 8
+	if diff := r.counter - prev; diff != r.counter && diff > 1 {
+		return 0, MissingCaduError(diff)
+	}
 	if r.body {
 		vs = vs[caduHeaderLen : caduPacketLen-caduCheckLen]
-		// if bytes.Equal(vs, empty) {
-		// 	return r.readSingle(bs)
-		// }
 	}
 	return copy(bs, vs), nil
 }
