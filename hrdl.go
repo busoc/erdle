@@ -153,6 +153,16 @@ type Decoder struct {
 }
 
 func HRDL(r io.Reader) *Decoder {
+	if _, ok := r.(*Builder); !ok {
+		b := Builder{
+			inner:       r,
+			Order:       binary.LittleEndian,
+			Word:        Word,
+			KeepTrailer: true,
+			KeepHeader:  true,
+		}
+		r = &b
+	}
 	return &Decoder{
 		inner:  r,
 		buffer: make([]byte, 8<<20),
