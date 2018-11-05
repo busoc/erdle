@@ -58,7 +58,7 @@ func NewReader(r io.Reader, hrdfe bool) io.Reader {
 	return &vcduReader{
 		inner:   r,
 		skip:    skip,
-		counter: caduCounterLimit,
+		counter: 0,
 	}
 }
 
@@ -85,6 +85,7 @@ func (r *vcduReader) readSingle(bs []byte) (int, error) {
 	vs = vs[r.skip:]
 	curr := binary.BigEndian.Uint32(vs[6:]) >> 8
 	// if diff := curr - r.counter; diff != curr && diff > 1 {
+	// 	return MissingCaduError(diff)
 	// 	log.Printf("%d missing packets (%d - %d)", diff, r.counter, curr)
 	// }
 	r.counter = curr

@@ -107,7 +107,7 @@ func Relay(w io.Writer, r io.Reader, proxy string) error {
 		if err != nil && err != erdle.ErrFull {
 			errmsg = err.Error()
 		}
-		log.Printf("%d packet decoded (%d bytes): %s", i, n, errmsg)
+		log.Printf("HRDL packet (%d) decoded (%d bytes): %s", i, n, errmsg)
 	}
 	return nil
 }

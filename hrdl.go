@@ -80,6 +80,7 @@ func (b *Builder) Read(bs []byte) (int, error) {
 			}
 			n, err := b.inner.Read(bs[written : written+caduBodyLen])
 			if err != nil {
+				b.reset(nil)
 				return 0, err
 			}
 			offset = written
@@ -88,6 +89,7 @@ func (b *Builder) Read(bs []byte) (int, error) {
 		if written < hrdlHeaderLen+16 {
 			n, err := b.inner.Read(bs[written : written+caduBodyLen])
 			if err != nil {
+				b.reset(nil)
 				return 0, err
 			}
 			written += n
@@ -109,6 +111,7 @@ func (b *Builder) Read(bs []byte) (int, error) {
 		}
 		n, err := b.inner.Read(bs[written : written+caduBodyLen])
 		if err != nil {
+			b.reset(nil)
 			return 0, err
 		}
 		offset = written
@@ -142,8 +145,9 @@ func (b *Builder) isFull(bs []byte) (int, error) {
 
 func (b *Builder) reset(bs []byte) {
 	b.size, b.written = 0, 0
+	b.buffer = b.buffer[:0]
 	if len(bs) > 0 {
-		b.buffer = append(b.buffer[:0], bs...)
+		b.buffer = append(b.buffer, bs...)
 	}
 }
 
