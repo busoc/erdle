@@ -11,6 +11,7 @@ import (
 )
 
 const (
+	hdkInstance = 0
 	hdkVersion = 0
 	vmuVersion = 2
 )
@@ -110,6 +111,60 @@ func Relay(w io.Writer, r io.Reader, proxy string) error {
 		log.Printf("HRDL packet (%d) decoded (%d bytes): %s", i, n, errmsg)
 	}
 	return nil
+}
+
+type hadockRelayer struct {
+	io.Writer
+	buffer []byte
+	preamble uint16
+	sequence uint16
+}
+
+func Hadock(w io.Writer, size int) io.Writer {
+	return &hadockRelayer{
+		Writer: w,
+		buffer: make([]byte, size),
+		preamble: uint16(hdkVersion)<<12 | uint16(vmuVersion)<<8 | uint16(hdkInstance),
+	}
+}
+
+func (r *hadockRelayer) ReadFrom(r io.Reader) (int, error) {
+	var n int
+
+	for {
+		nn, err := r.Read(b.buffer)
+		switch err {
+		case nil:
+		case erdle.ErrFull:
+			r.sequence++
+		default:
+			return n, err
+		}
+		var buffer []byte
+		if bytes.Equal(r.buffer[:4], erdle.Word) {
+			size := binary.LittleEndian.Uint32(r.buffer[4:])
+
+			var buf bytes.Buffer
+			buf.Write(r.buffer[:4])
+			binary.Write(&buf, binary.BigEndian, r.preamble)
+			binary.Write(&buf, binary.BigEndian, r.sequence)
+			binary.Write(&buf, binary.BigEndian, size)
+			buf.Write(r.buffer[8:nn])
+
+			buffer = buf.Bytes()
+		} else {
+			buffer = r.buffer[:nn]
+		}
+		if err == erdle.ErrFull {
+			buffer = append(buffer, 0xFF, 0xFF)
+		}
+		if nn, err := r.Writer.Write(buffer); err != nil {
+			return n, err
+		} else {
+			n += nn
+		}
+	}
+	return n, nil
 }
 
 type hrdlRelayer struct {
