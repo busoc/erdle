@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"hash"
 	"io"
-	// "log"
 	"time"
 )
 
@@ -47,6 +46,8 @@ type vcduReader struct {
 	skip  int
 	body  bool
 
+	buffer []byte
+
 	counter uint32
 }
 
@@ -59,6 +60,7 @@ func NewReader(r io.Reader, hrdfe bool) io.Reader {
 		inner:   r,
 		skip:    skip,
 		counter: 0,
+		buffer : make([]byte, caduPacketLen+skip),
 	}
 }
 
@@ -78,20 +80,22 @@ var empty = make([]byte, caduBodyLen)
 
 func (r *vcduReader) readSingle(bs []byte) (int, error) {
 	vs := make([]byte, caduPacketLen+r.skip)
-	n, err := r.inner.Read(vs)
+	n, err := r.inner.Read(r.buffer)
 	if err != nil {
 		return n, err
 	}
-	vs = vs[r.skip:]
 	prev := r.counter
 	r.counter = binary.BigEndian.Uint32(vs[6:]) >> 8
 	if diff := r.counter - prev; diff != r.counter && diff > 1 {
 		return 0, MissingCaduError(diff)
 	}
+	fix := r.skip
+	tix := len(r.buffer)
 	if r.body {
-		vs = vs[caduHeaderLen : caduPacketLen-caduCheckLen]
+		fix += caduHeaderLen
+		tix -= caduCheckLen
 	}
-	return copy(bs, vs), nil
+	return copy(bs, r.buffer[fix:tix]), nil
 }
 
 func DecodeCadu(r io.Reader) (*Cadu, error) {

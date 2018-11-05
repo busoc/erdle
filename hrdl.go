@@ -39,6 +39,7 @@ func NewBuilder(r io.Reader, hrdfe bool) *Builder {
 		x := &vcduReader{
 			inner: r,
 			body:  true,
+			buffer : make([]byte, caduPacketLen),
 		}
 		if hrdfe {
 			x.skip = 8
