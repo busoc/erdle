@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -22,9 +24,10 @@ var relayCommand = &cli.Command{
 	Run:   runRelay,
 }
 
-type relayFunc func(string, string, string) error
+type relayFunc func(string, string, string, string) error
 
 func runRelay(cmd *cli.Command, args []string) error {
+	mode := cmd.Flag.String("m", "", "mode")
 	proxy := cmd.Flag.String("d", "", "proxy packets to")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
@@ -40,10 +43,10 @@ func runRelay(cmd *cli.Command, args []string) error {
 		return fmt.Errorf("unsupported protocol %s", proto)
 	}
 
-	return relay(addr, cmd.Flag.Arg(1), *proxy)
+	return relay(addr, cmd.Flag.Arg(1), *proxy, *mode)
 }
 
-func relayTCP(local, remote, proxy string) error {
+func relayTCP(local, remote, proxy, mode string) error {
 	c, err := net.Listen("tcp", local)
 	if err != nil {
 		return err
@@ -64,14 +67,14 @@ func relayTCP(local, remote, proxy string) error {
 				r.Close()
 				w.Close()
 			}()
-			if err := Relay(w, r, proxy); err != nil {
+			if err := Relay(w, r, proxy, mode); err != nil {
 				log.Println(err)
 			}
 		}(r, w)
 	}
 }
 
-func relayUDP(local, remote, proxy string) error {
+func relayUDP(local, remote, proxy, mode string) error {
 	w, err := net.Dial(protoFromAddr(remote))
 	if err != nil {
 		return err
@@ -88,27 +91,41 @@ func relayUDP(local, remote, proxy string) error {
 	}
 	defer r.Close()
 
-	return Relay(w, r, proxy)
+	return Relay(w, r, proxy, mode)
 }
 
-func Relay(w io.Writer, r io.Reader, proxy string) error {
+func Relay(w io.Writer, r io.Reader, proxy, mode string) error {
 	if x, err := net.Dial(protoFromAddr(proxy)); err == nil {
 		defer x.Close()
 		r = io.TeeReader(r, x)
 	}
-	ws := HRDL(w)
 	rs := erdle.NewBuilder(r, false)
-	buffer := make([]byte, 32<<10)
-	for i := 1; ; i++ {
-		n, err := io.CopyBuffer(ws, rs, buffer)
-		if !erdle.IsErdleError(err) {
-			return err
+	switch mode {
+	case "", "raw", "hrdl":
+		ws := HRDL(w)
+		buffer := make([]byte, 32<<10)
+		for i := 1; ; i++ {
+			n, err := io.CopyBuffer(ws, rs, buffer)
+			if !erdle.IsErdleError(err) {
+				return err
+			}
+			errmsg := "no error"
+			if err != nil && err != erdle.ErrFull {
+				errmsg = err.Error()
+			}
+			log.Printf("HRDL packet (%d) decoded (%d bytes): %s", i, n, errmsg)
 		}
-		errmsg := "no error"
-		if err != nil && err != erdle.ErrFull {
-			errmsg = err.Error()
+	case "hdk", "hadock":
+		ws := Hadock(w, 4<<10)
+		for i := 1; ; i++ {
+			_, err := io.Copy(ws, rs)
+			if !erdle.IsErdleError(err) {
+				return err
+			}
+			log.Printf("error while decoding HRDL packet (%d): %s", i, err)
 		}
-		log.Printf("HRDL packet (%d) decoded (%d bytes): %s", i, n, errmsg)
+	default:
+		return fmt.Errorf("unsupported mode %s", mode)
 	}
 	return nil
 }
@@ -128,40 +145,40 @@ func Hadock(w io.Writer, size int) io.Writer {
 	}
 }
 
-func (r *hadockRelayer) ReadFrom(r io.Reader) (int, error) {
-	var n int
+func (hr *hadockRelayer) ReadFrom(r io.Reader) (int64, error) {
+	var n int64
 
 	for {
-		nn, err := r.Read(b.buffer)
+		nn, err := r.Read(hr.buffer)
 		switch err {
 		case nil:
 		case erdle.ErrFull:
-			r.sequence++
+			hr.sequence++
 		default:
 			return n, err
 		}
 		var buffer []byte
-		if bytes.Equal(r.buffer[:4], erdle.Word) {
-			size := binary.LittleEndian.Uint32(r.buffer[4:])
+		if bytes.Equal(hr.buffer[:4], erdle.Word) {
+			size := binary.LittleEndian.Uint32(hr.buffer[4:])+4
 
 			var buf bytes.Buffer
-			buf.Write(r.buffer[:4])
-			binary.Write(&buf, binary.BigEndian, r.preamble)
-			binary.Write(&buf, binary.BigEndian, r.sequence)
+			buf.Write(hr.buffer[:4])
+			binary.Write(&buf, binary.BigEndian, hr.preamble)
+			binary.Write(&buf, binary.BigEndian, hr.sequence)
 			binary.Write(&buf, binary.BigEndian, size)
-			buf.Write(r.buffer[8:nn])
+			buf.Write(hr.buffer[8:nn])
 
 			buffer = buf.Bytes()
 		} else {
-			buffer = r.buffer[:nn]
+			buffer = hr.buffer[:nn]
 		}
 		if err == erdle.ErrFull {
 			buffer = append(buffer, 0xFF, 0xFF)
 		}
-		if nn, err := r.Writer.Write(buffer); err != nil {
+		if nn, err := hr.Write(buffer); err != nil {
 			return n, err
 		} else {
-			n += nn
+			n += int64(nn)
 		}
 	}
 	return n, nil

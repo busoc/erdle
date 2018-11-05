@@ -45,7 +45,15 @@ func runReplay(cmd *cli.Command, args []string) error {
 
 	when := time.Now()
 	vs := make([]byte, 1024)
-	n, err := io.CopyBuffer(w, r, vs)
+	var n int
+	for {
+		_, err = io.CopyBuffer(w, r, vs)
+		log.Printf("%T %v", err, err)
+		if  !erdle.IsErdleError(err) {
+			break
+		}
+	}
+	// n, err := io.CopyBuffer(w, r, vs)
 	if err == nil {
 		log.Printf("%d KB sent in %s", n>>10, time.Since(when))
 	}

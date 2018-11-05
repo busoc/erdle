@@ -209,6 +209,9 @@ func decodeHRDLPackets(d *erdle.Decoder, w io.Writer, sid int) (int, int, int, e
 			return sid, invalid, size, err
 		case err != nil && erdle.IsErdleError(err):
 			invalid++
+			if erdle.IsMissingCadu(err) {
+				continue
+			}
 		default:
 		}
 		size += int(e.HRDLHeader.Size)
