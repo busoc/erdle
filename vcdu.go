@@ -79,13 +79,12 @@ func (r *vcduReader) Read(bs []byte) (int, error) {
 var empty = make([]byte, caduBodyLen)
 
 func (r *vcduReader) readSingle(bs []byte) (int, error) {
-	vs := make([]byte, caduPacketLen+r.skip)
 	n, err := r.inner.Read(r.buffer)
 	if err != nil {
 		return n, err
 	}
 	prev := r.counter
-	r.counter = binary.BigEndian.Uint32(vs[6:]) >> 8
+	r.counter = binary.BigEndian.Uint32(r.buffer[r.skip+6:]) >> 8
 	if diff := r.counter - prev; diff != r.counter && diff > 1 {
 		return 0, MissingCaduError(diff)
 	}
