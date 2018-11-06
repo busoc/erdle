@@ -45,19 +45,19 @@ func runReplay(cmd *cli.Command, args []string) error {
 
 	when := time.Now()
 	vs := make([]byte, 1024)
-	var n int
+	var n int64
 	for {
-		_, err = io.CopyBuffer(w, r, vs)
-		log.Printf("%T %v", err, err)
+		nn, err := io.CopyBuffer(w, r, vs)
 		if !erdle.IsErdleError(err) {
-			break
+			return err
+		} else {
+			n += nn
+			log.Printf("%s", err)
 		}
 	}
 	// n, err := io.CopyBuffer(w, r, vs)
-	if err == nil {
-		log.Printf("%d KB sent in %s", n>>10, time.Since(when))
-	}
-	return err
+	log.Printf("%d KB sent in %s", n>>10, time.Since(when))
+	return nil
 }
 
 func Replay(addr string, z cli.Size) (net.Conn, error) {
@@ -86,7 +86,8 @@ type replay struct {
 func (r *replay) Write(bs []byte) (int, error) {
 	v := r.limiter.ReserveN(time.Now(), len(bs))
 	if !v.OK() {
-		return 0, nil
+		log.Printf("skipping %d bytes", len(bs))
+		return len(bs), nil
 	}
 	time.Sleep(v.Delay())
 
