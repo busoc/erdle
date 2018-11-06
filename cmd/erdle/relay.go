@@ -136,13 +136,14 @@ type hadockRelayer struct {
 
 	buffer   []byte
 	sequence uint16
+	size     int
 }
 
 const hdkHeaderLen = 12 // sync(4)+preamble(2)+sequence(2)+size(4)
 
 func Hadock(w io.Writer, size int) io.Writer {
 	preamble := uint16(hdkVersion)<<12 | uint16(vmuVersion)<<8 | uint16(hdkInstance)
-	buffer := make([]byte, hdkHeaderLen+size)
+	buffer := make([]byte, hdkHeaderLen+size+2)
 
 	copy(buffer, erdle.Word)
 	binary.BigEndian.PutUint16(buffer[4:], preamble)
@@ -150,38 +151,40 @@ func Hadock(w io.Writer, size int) io.Writer {
 	return &hadockRelayer{
 		Writer: w,
 		buffer: buffer,
+		size:   len(buffer) - 2,
 	}
 }
 
 func (hr *hadockRelayer) ReadFrom(r io.Reader) (int64, error) {
 	var n int64
 
-	buffer := make([]byte, len(hr.buffer)+2)
 	for {
-		nn, err := r.Read(hr.buffer[hdkHeaderLen:])
+		nn, err := r.Read(hr.buffer[hdkHeaderLen:hr.size])
 		switch err {
 		case nil:
 		case erdle.ErrFull:
+			binary.BigEndian.PutUint16(hr.buffer[hdkHeaderLen+nn:], 0xFFFF)
+			nn += 2
 			hr.sequence++
 		default:
 			return n, err
 		}
+
+		var ix int
 		if bytes.Equal(hr.buffer[hdkHeaderLen:hdkHeaderLen+4], erdle.Word) {
 			size := binary.LittleEndian.Uint32(hr.buffer[hdkHeaderLen+4:]) + 4
+
+			vs := make([]byte, 4)
+			binary.BigEndian.PutUint32(vs, size)
 
 			binary.BigEndian.PutUint16(hr.buffer[6:], hr.sequence)
 			binary.BigEndian.PutUint32(hr.buffer[8:], size)
 
-			copy(buffer, hr.buffer[:hdkHeaderLen])
-			nn = copy(buffer[hdkHeaderLen:], hr.buffer[hdkHeaderLen+8:hdkHeaderLen+nn]) + hdkHeaderLen
+			nn = copy(hr.buffer[hdkHeaderLen:], hr.buffer[hdkHeaderLen+8:hdkHeaderLen+nn]) + hdkHeaderLen
 		} else {
-			nn = copy(buffer, hr.buffer[hdkHeaderLen:hdkHeaderLen+nn])
+			ix = hdkHeaderLen
 		}
-		if err == erdle.ErrFull {
-			binary.BigEndian.PutUint16(buffer[nn:], 0xFFFF)
-			nn += 2
-		}
-		if nn, err := hr.Write(buffer[:nn]); err != nil {
+		if nn, err := hr.Write(hr.buffer[ix : ix+nn]); err != nil {
 			return n, err
 		} else {
 			n += int64(nn)

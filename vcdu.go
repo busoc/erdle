@@ -93,6 +93,9 @@ func (r *vcduReader) readSingle(bs []byte) (int, error) {
 	if r.body {
 		fix += caduHeaderLen
 		tix -= caduCheckLen
+		if bytes.Equal(r.buffer[fix:tix], empty) {
+			return r.readSingle(bs)
+		}
 	}
 	return copy(bs, r.buffer[fix:tix]), nil
 }
