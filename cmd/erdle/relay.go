@@ -100,7 +100,8 @@ func Relay(w io.Writer, r io.Reader, proxy, mode string, size int) error {
 		defer x.Close()
 		r = io.TeeReader(r, x)
 	}
-	rs := erdle.NewBuilder(r, false)
+	// rs := erdle.NewBuilder(r, false)
+	rs := Ring(4<<20, erdle.NewBuilder(r, false))
 	switch mode {
 	case "", "raw", "hrdl":
 		ws := HRDL(w)
@@ -203,4 +204,80 @@ func HRDL(w io.Writer) io.Writer {
 
 func (r *hrdlRelayer) Write(bs []byte) (int, error) {
 	return r.w.Write(bs)
+}
+
+type ring struct {
+	buffer []byte
+
+	rix   int
+	rchan chan int
+
+	wix   int
+	wchan chan int
+}
+
+func Ring(s int, rs io.Reader) io.ReadWriter {
+	r := ring{
+		buffer: make([]byte, s),
+		rchan:  make(chan int),
+		wchan:  make(chan int),
+	}
+	go r.syncboth()
+	go r.fill(rs)
+	return &r
+}
+
+func (r *ring) Read(bs []byte) (int, error) {
+	r.rchan <- len(bs)
+	<-r.rchan
+	n := copy(bs, r.buffer[r.rix:])
+	if n < len(bs) {
+		n, r.rix = copy(bs[n:], r.buffer), 0
+	}
+	r.rix += n
+	return len(bs), nil
+}
+
+func (r *ring) Write(bs []byte) (int, error) {
+	n := copy(r.buffer[r.wix:], bs)
+	if n < len(bs) {
+		n, r.wix = copy(r.buffer, bs[n:]), 0
+	}
+	r.wix += n
+	r.wchan <- len(bs)
+	return len(bs), nil
+}
+
+func (r *ring) fill(rs io.Reader) {
+	for {
+		_, err := io.Copy(r, rs)
+		if !erdle.IsErdleError(err) {
+			return
+		}
+	}
+}
+
+func (r *ring) syncboth() {
+	var available int
+	for {
+		log.Println(available)
+		select {
+		case n, _ := <-r.wchan:
+			available += n
+		case n, _ := <-r.rchan:
+			if n < available {
+				available -= n
+				r.rchan <- n
+				break
+			}
+			for nn := range r.wchan {
+				available += nn
+				if n < available {
+					available -= n
+					r.rchan <- n
+					break
+				}
+			}
+		}
+	}
 }
