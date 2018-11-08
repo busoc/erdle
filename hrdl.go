@@ -87,7 +87,7 @@ func (b *Builder) Read(bs []byte) (int, error) {
 			offset = written
 			written += n
 		}
-		if written < hrdlHeaderLen+16 {
+		if written < hrdlHeaderLen+16 && len(bs) > written+caduBodyLen {
 			n, err := b.inner.Read(bs[written : written+caduBodyLen])
 			if err != nil {
 				b.reset(nil)
@@ -392,16 +392,11 @@ type assembler struct {
 	total   uint64
 }
 
-const (
-	caduCounterLim  = 1 << 24
-	caduCounterMask = 0x0FFF
-)
-
 func Reassemble(r io.Reader, hrdfe bool) io.Reader {
 	rs := &assembler{
 		inner:   bufio.NewReaderSize(r, 8<<20),
 		rest:    new(bytes.Buffer),
-		counter: caduCounterLim,
+		counter: caduCounterLimit,
 	}
 	if hrdfe {
 		rs.skip = 8
@@ -487,7 +482,7 @@ func (r *assembler) readCadu() ([]byte, error) {
 	seq := binary.BigEndian.Uint32(vs[r.skip+6:]) >> 8
 
 	var err error
-	if r.counter != caduCounterLim {
+	if r.counter != caduCounterLimit {
 		if diff := (seq - r.counter) & caduCounterMask; diff > 1 {
 			// err = MissingCaduError(int(diff))
 		}

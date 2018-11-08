@@ -14,12 +14,15 @@ const (
 )
 
 const (
-	caduHeaderLen    = 14
-	caduCheckLen     = 2
-	caduPacketLen    = 1024
-	caduBodyLen      = caduPacketLen - caduHeaderLen - caduCheckLen
-	caduCounterLimit = 1 << 24
-	// caduCounterMask = caduCounterLimit-1
+	caduHeaderLen = 14
+	caduCheckLen  = 2
+	caduPacketLen = 1024
+	caduBodyLen   = caduPacketLen - caduHeaderLen - caduCheckLen
+)
+
+const (
+	caduCounterLimit uint32 = 1 << 24
+	caduCounterMask  uint32 = caduCounterLimit - 1
 )
 
 type VCDUHeader struct {
@@ -83,9 +86,12 @@ func (r *vcduReader) readSingle(bs []byte) (int, error) {
 	if err != nil {
 		return n, err
 	}
+	if n == 0 {
+		return r.readSingle(bs)
+	}
 	prev := r.counter
 	r.counter = binary.BigEndian.Uint32(r.buffer[r.skip+6:]) >> 8
-	if diff := r.counter - prev; diff != r.counter && diff > 1 {
+	if diff := (r.counter - prev) & caduCounterMask; diff != r.counter && diff > 1 {
 		return 0, MissingCaduError(diff)
 	}
 	fix := r.skip
@@ -93,9 +99,6 @@ func (r *vcduReader) readSingle(bs []byte) (int, error) {
 	if r.body {
 		fix += caduHeaderLen
 		tix -= caduCheckLen
-		if bytes.Equal(r.buffer[fix:tix], empty) {
-			return r.readSingle(bs)
-		}
 	}
 	return copy(bs, r.buffer[fix:tix]), nil
 }

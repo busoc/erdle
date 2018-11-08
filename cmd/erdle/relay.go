@@ -92,7 +92,7 @@ func relayUDP(local, remote, proxy, mode string, size int) error {
 	}
 	defer r.Close()
 
-	return Relay(w, r, proxy, mode, size)
+	return Relay(w, Ring(8<<20, r), proxy, mode, size)
 }
 
 func Relay(w io.Writer, r io.Reader, proxy, mode string, size int) error {
@@ -100,8 +100,7 @@ func Relay(w io.Writer, r io.Reader, proxy, mode string, size int) error {
 		defer x.Close()
 		r = io.TeeReader(r, x)
 	}
-	// rs := erdle.NewBuilder(r, false)
-	rs := Ring(4<<20, erdle.NewBuilder(r, false))
+	rs := erdle.NewBuilder(r, false)
 	switch mode {
 	case "", "raw", "hrdl":
 		ws := HRDL(w)
@@ -222,7 +221,7 @@ func Ring(s int, rs io.Reader) io.ReadWriter {
 		rchan:  make(chan int),
 		wchan:  make(chan int),
 	}
-	go r.syncboth()
+	go r.syncboth(s / 2)
 	go r.fill(rs)
 	return &r
 }
@@ -232,18 +231,20 @@ func (r *ring) Read(bs []byte) (int, error) {
 	<-r.rchan
 	n := copy(bs, r.buffer[r.rix:])
 	if n < len(bs) {
-		n, r.rix = copy(bs[n:], r.buffer), 0
+		r.rix = copy(bs[n:], r.buffer)
+	} else {
+		r.rix += n
 	}
-	r.rix += n
 	return len(bs), nil
 }
 
 func (r *ring) Write(bs []byte) (int, error) {
 	n := copy(r.buffer[r.wix:], bs)
 	if n < len(bs) {
-		n, r.wix = copy(r.buffer, bs[n:]), 0
+		r.wix = copy(r.buffer, bs[n:])
+	} else {
+		r.wix += n
 	}
-	r.wix += n
 	r.wchan <- len(bs)
 	return len(bs), nil
 }
@@ -257,13 +258,16 @@ func (r *ring) fill(rs io.Reader) {
 	}
 }
 
-func (r *ring) syncboth() {
+func (r *ring) syncboth(threshold int) {
 	var available int
 	for {
-		log.Println(available)
 		select {
 		case n, _ := <-r.wchan:
 			available += n
+			for available < threshold {
+				nn := <-r.wchan
+				available += nn
+			}
 		case n, _ := <-r.rchan:
 			if n < available {
 				available -= n
@@ -272,6 +276,10 @@ func (r *ring) syncboth() {
 			}
 			for nn := range r.wchan {
 				available += nn
+				for available < threshold {
+					nn := <-r.wchan
+					available += nn
+				}
 				if n < available {
 					available -= n
 					r.rchan <- n

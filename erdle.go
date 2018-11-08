@@ -12,10 +12,10 @@ var (
 	Stuff = []byte{0xf8, 0x2e, 0x35, 0xaa}
 )
 
-type MissingCaduError int
+type MissingCaduError uint32
 
 func (e MissingCaduError) Error() string {
-	return fmt.Sprintf("%d missing cadu(s)", int(e))
+	return fmt.Sprintf("%d missing cadu(s)", uint32(e))
 }
 
 type LengthError struct {
