@@ -55,16 +55,17 @@ type vcduReader struct {
 }
 
 func NewReader(r io.Reader, hrdfe bool) io.Reader {
-	var skip int
-	if hrdfe {
-		skip = 8
-	}
-	return &vcduReader{
+	v := vcduReader{
 		inner:   r,
-		skip:    skip,
 		counter: 0,
-		buffer:  make([]byte, caduPacketLen+skip),
 	}
+	if hrdfe {
+		v.skip = 8
+		v.buffer = make([]byte, caduPacketLen+v.skip)
+	} else {
+		v.buffer = make([]byte, caduPacketLen)
+	}
+	return &v
 }
 
 func (r *vcduReader) Read(bs []byte) (int, error) {
@@ -78,8 +79,6 @@ func (r *vcduReader) Read(bs []byte) (int, error) {
 	}
 	return n, nil
 }
-
-var empty = make([]byte, caduBodyLen)
 
 func (r *vcduReader) readSingle(bs []byte) (int, error) {
 	n, err := r.inner.Read(r.buffer)

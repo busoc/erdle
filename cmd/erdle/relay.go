@@ -10,7 +10,6 @@ import (
 
 	"github.com/busoc/erdle"
 	"github.com/midbel/cli"
-	"github.com/midbel/ringbuffer"
 )
 
 const (
@@ -93,7 +92,7 @@ func relayUDP(local, remote, proxy, mode string, size int) error {
 	}
 	defer r.Close()
 
-	return Relay(w, ringbuffer.Ring(8<<20, r), proxy, mode, size)
+	return Relay(w, r, proxy, mode, size)
 }
 
 func Relay(w io.Writer, r io.Reader, proxy, mode string, size int) error {
