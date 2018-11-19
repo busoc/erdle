@@ -19,7 +19,7 @@ var replayCommand = &cli.Command{
 }
 
 func runReplay(cmd *cli.Command, args []string) error {
-	rate, _ := cli.ParseSize("32m")
+	rate := cli.Size(0)
 	cmd.Flag.Var(&rate, "r", "bandwidth usage")
 	hrdfe := cmd.Flag.Bool("e", false, "hrdfe")
 	if err := cmd.Flag.Parse(args); err != nil {
@@ -43,20 +43,42 @@ func runReplay(cmd *cli.Command, args []string) error {
 	}
 	r := erdle.NewReader(io.MultiReader(rs...), *hrdfe)
 
-	when := time.Now()
-	vs := make([]byte, 1024)
 
-	w := ratelimit.Writer(c, ratelimit.NewBucketWithRate(rate.Float(), rate.Int()))
-	var n int64
+	var w io.Writer = c
+	if rate.Int() > 0 {
+		w = ratelimit.Writer(c, ratelimit.NewBucketWithRate(rate.Float(), 0))
+	}
+	cadu := make([]byte, 1024)
+	tick := time.Tick(time.Second)
+	var n, i int
 	for {
-		nn, err := io.CopyBuffer(w, r, vs)
-		if !erdle.IsErdleError(err) {
+		_, err := r.Read(cadu)
+		if err != nil {
+			if !erdle.IsMissingCadu(err) {
+				return err
+			}
+			log.Println(err)
+		}
+		if nn, err := w.Write(cadu); err != nil {
 			return err
 		} else {
 			n += nn
-			log.Printf("%s", err)
+			i++
 		}
+		select {
+		case <-tick:
+			log.Printf("%d cadus send (%dKB)", i, n>>10)
+			n, i = 0, 0
+		default:
+		}
+		//
+		// nn, err := io.CopyBuffer(w, r, vs)
+		// if !erdle.IsErdleError(err) {
+		// 	return err
+		// } else {
+		// 	n += nn
+		// 	log.Printf("%s", err)
+		// }
 	}
-	log.Printf("%d KB sent in %s", n>>10, time.Since(when))
 	return nil
 }
