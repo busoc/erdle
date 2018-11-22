@@ -68,6 +68,11 @@ func relayTCP(local, remote, proxy, mode string, size int) error {
 				r.Close()
 				w.Close()
 			}()
+			if c, ok := w.(interface{ SetWriteBuffer(int) error}); ok {
+				if err := c.SetWriteBuffer(16<<20); err != nil {
+					return 
+				}
+			}
 			if err := Relay(w, r, proxy, mode, size); err != nil {
 				log.Println(err)
 			}
@@ -91,6 +96,9 @@ func relayUDP(local, remote, proxy, mode string, size int) error {
 		return err
 	}
 	defer r.Close()
+	if err := r.SetReadBuffer(32<<20); err != nil {
+		return err
+	}
 
 	return Relay(w, r, proxy, mode, size)
 }

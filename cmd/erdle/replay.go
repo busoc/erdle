@@ -31,6 +31,12 @@ func runReplay(cmd *cli.Command, args []string) error {
 	}
 	defer c.Close()
 
+	if c, ok := c.(interface{ SetWriteBuffer(int) error}); ok {
+		if err := c.SetWriteBuffer(16<<20); err != nil {
+			return err
+		}
+	}
+
 	var rs []io.Reader
 	for i := 1; i < cmd.Flag.NArg(); i++ {
 		r, err := os.Open(cmd.Flag.Arg(i))
@@ -46,7 +52,7 @@ func runReplay(cmd *cli.Command, args []string) error {
 
 	var w io.Writer = c
 	if rate.Int() > 0 {
-		w = ratelimit.Writer(c, ratelimit.NewBucketWithRate(rate.Float(), 0))
+		w = ratelimit.Writer(c, ratelimit.NewBucketWithRate(rate.Float(), rate.Int()))
 	}
 	cadu := make([]byte, 1024)
 	tick := time.Tick(time.Second)
