@@ -16,6 +16,7 @@ import (
 
 	"github.com/busoc/erdle"
 	"golang.org/x/sync/errgroup"
+	// "github.com/midbel/ringbuffer"
 )
 
 var Word = []byte{0xf8, 0x2e, 0x35, 0x53}
@@ -238,7 +239,7 @@ func reassemble(addr string, n int) (<-chan []byte, error) {
 					if !erdle.IsMissingCadu(err) {
 						return
 					}
-					logger.Println(err)
+					logger.Printf("buffer reset: %v", err)
 					buffer, offset = buffer[:0], 0
 					continue
 				}
@@ -251,15 +252,6 @@ func reassemble(addr string, n int) (<-chan []byte, error) {
 				offset += n - WordLen
 			}
 			for {
-				n, err := r.Read(block)
-				if err != nil {
-					if !erdle.IsMissingCadu(err) {
-						return
-					}
-					logger.Println(err)
-					break
-				}
-				buffer = append(buffer, block[:n]...)
 				if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {
 					select {
 					case q <- buffer[:offset+ix]:
@@ -269,6 +261,15 @@ func reassemble(addr string, n int) (<-chan []byte, error) {
 					rest = buffer[offset+ix:]
 					break
 				}
+				n, err := r.Read(block)
+				if err != nil {
+					if !erdle.IsMissingCadu(err) {
+						return
+					}
+					logger.Printf("skip hrdl packet: %v", err)
+					break
+				}
+				buffer = append(buffer, block[:n]...)
 				offset += n - WordLen
 			}
 		}

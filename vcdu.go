@@ -58,12 +58,12 @@ func NewReader(r io.Reader, hrdfe bool) io.Reader {
 	v := vcduReader{
 		inner:   r,
 		counter: 0,
-		body:    true,
 	}
 	if hrdfe {
 		v.skip = 8
 		v.buffer = make([]byte, caduPacketLen+v.skip)
 	} else {
+		v.body = true
 		v.buffer = make([]byte, caduPacketLen)
 	}
 	return &v
@@ -92,7 +92,7 @@ func (r *vcduReader) readSingle(bs []byte) (int, error) {
 	prev := r.counter
 	r.counter = binary.BigEndian.Uint32(r.buffer[r.skip+6:]) >> 8
 	if diff := (r.counter - prev) & caduCounterMask; diff != r.counter && diff > 1 {
-		return 0, MissingCaduError(diff)
+		return 0, MissingCaduError{From: prev, To: r.counter}
 	}
 	fix := r.skip
 	tix := len(r.buffer)
