@@ -31,8 +31,8 @@ func runReplay(cmd *cli.Command, args []string) error {
 	}
 	defer c.Close()
 
-	if c, ok := c.(interface{ SetWriteBuffer(int) error}); ok {
-		if err := c.SetWriteBuffer(16<<20); err != nil {
+	if c, ok := c.(interface{ SetWriteBuffer(int) error }); ok {
+		if err := c.SetWriteBuffer(16 << 20); err != nil {
 			return err
 		}
 	}
@@ -48,7 +48,6 @@ func runReplay(cmd *cli.Command, args []string) error {
 		rs = append(rs, r)
 	}
 	r := erdle.NewReader(io.MultiReader(rs...), *hrdfe)
-
 
 	var w io.Writer = c
 	if rate.Int() > 0 {
