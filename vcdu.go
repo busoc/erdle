@@ -58,6 +58,7 @@ func NewReader(r io.Reader, hrdfe bool) io.Reader {
 	v := vcduReader{
 		inner:   r,
 		counter: 0,
+		body:    true,
 	}
 	if hrdfe {
 		v.skip = 8
