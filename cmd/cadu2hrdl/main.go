@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/busoc/erdle"
+	"github.com/midbel/ringbuffer"
 	"golang.org/x/sync/errgroup"
-	// "github.com/midbel/ringbuffer"
 )
 
 var Word = []byte{0xf8, 0x2e, 0x35, 0x53}
@@ -32,6 +32,8 @@ const (
 type pool struct {
 	addr  string
 	queue chan net.Conn
+
+	writePacket func(io.Writer, uint16, []byte) (int, error)
 
 	sequence uint32
 	preamble uint16
@@ -49,8 +51,15 @@ func NewPool(a string, n, i int) (*pool, error) {
 	if n <= 1 {
 		return nil, fmt.Errorf("number of connections too small")
 	}
+	var (
+		f func(io.Writer, uint16, []byte) (int, error)
+		p pool
+	)
 	switch i {
 	case 0, 1, 2, 255:
+		f = p.writeHadock
+	case -1:
+		f = p.writeHRDL
 	default:
 		return nil, fmt.Errorf("invalid instance")
 	}
@@ -62,20 +71,29 @@ func NewPool(a string, n, i int) (*pool, error) {
 		}
 		q <- c
 	}
-	p := pool{
-		addr:     a,
-		queue:    q,
-		preamble: uint16(hdkVersion)<<12 | uint16(vmuVersion)<<8 | uint16(i),
+	p = pool{
+		addr:        a,
+		queue:       q,
+		writePacket: f,
+		preamble:    uint16(hdkVersion)<<12 | uint16(vmuVersion)<<8 | uint16(i),
 	}
 	return &p, nil
 }
 
-func (p *pool) Write(bs []byte) (int, error) {
-	c, next, err := p.pop()
-	if err != nil {
-		return 0, err
-	}
+func (p *pool) writeHRDL(w io.Writer, _ uint16, bs []byte) (int, error) {
 	var buf bytes.Buffer
+
+	buf.Write(Word)
+	binary.Write(&buf, binary.LittleEndian, uint32(len(bs))-4)
+	buf.Write(bs)
+
+	n, err := io.Copy(w, &buf)
+	return int(n), err
+}
+
+func (p *pool) writeHadock(w io.Writer, next uint16, bs []byte) (int, error) {
+	var buf bytes.Buffer
+
 	buf.Write(Word)
 	binary.Write(&buf, binary.BigEndian, p.preamble)
 	binary.Write(&buf, binary.BigEndian, next)
@@ -83,13 +101,23 @@ func (p *pool) Write(bs []byte) (int, error) {
 	buf.Write(bs)
 	binary.Write(&buf, binary.BigEndian, uint16(0xFFFF))
 
-	n, err := io.Copy(c, &buf)
+	n, err := io.Copy(w, &buf)
+	return int(n), err
+}
+
+func (p *pool) Write(bs []byte) (int, error) {
+	c, next, err := p.pop()
+	if err != nil {
+		return 0, err
+	}
+
+	n, err := p.writePacket(c, next, bs)
 	if err != nil {
 		c.Close()
 	} else {
 		p.push(c)
 	}
-	return int(n), err
+	return n, err
 }
 
 func (p *pool) pop() (net.Conn, uint16, error) {
@@ -123,7 +151,7 @@ func (p *pool) push(c net.Conn) {
 func main() {
 	q := flag.Int("q", 64, "queue size before dropping HRDL packets")
 	c := flag.Int("c", 8, "number of connections to remote server")
-	i := flag.Int("i", hdkInstance, "hadock instance used")
+	i := flag.Int("i", -1, "hadock instance used")
 	k := flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
 	// f := flag.Bool("f", false, "fill missing cadus with zeros (not recommended)")
 	log.SetFlags(0)
@@ -219,6 +247,12 @@ func reassemble(addr string, n int) (<-chan []byte, error) {
 		return nil, err
 	}
 	q := make(chan []byte, n)
+
+	rg := ringbuffer.NewRingSize(32<<20, 4<<20)
+	go func() {
+		io.CopyBuffer(rg, c, make([]byte, 1024))
+	}()
+
 	go func() {
 		defer func() {
 			c.Close()
@@ -226,7 +260,7 @@ func reassemble(addr string, n int) (<-chan []byte, error) {
 		}()
 		logger := log.New(os.Stderr, "[assemble] ", 0)
 
-		r := erdle.NewReader(c, false)
+		r := erdle.NewReader(rg, false)
 		var rest []byte
 		for {
 			var offset int
@@ -239,12 +273,15 @@ func reassemble(addr string, n int) (<-chan []byte, error) {
 					if !erdle.IsMissingCadu(err) {
 						return
 					}
-					logger.Printf("buffer reset: %v", err)
+					logger.Printf("buffer reset (%d bytes discarded): %v", len(buffer), err)
 					buffer, offset = buffer[:0], 0
-					continue
+					// continue
 				}
 				buffer = append(buffer, block[:n]...)
-				if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {
+				if bytes.Equal(buffer[:WordLen], Word) {
+					offset = WordLen
+					break
+				} else if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {
 					buffer = buffer[offset+ix:]
 					offset = WordLen
 					break
@@ -252,24 +289,24 @@ func reassemble(addr string, n int) (<-chan []byte, error) {
 				offset += n - WordLen
 			}
 			for {
-				if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {
-					select {
-					case q <- buffer[:offset+ix]:
-					default:
-						logger.Println("packet dropped")
-					}
-					rest = buffer[offset+ix:]
-					break
-				}
 				n, err := r.Read(block)
 				if err != nil {
 					if !erdle.IsMissingCadu(err) {
 						return
 					}
-					logger.Printf("skip hrdl packet: %v", err)
+					logger.Printf("skip hrdl packet (%d bytes discarded): %v", len(buffer), err)
 					break
 				}
 				buffer = append(buffer, block[:n]...)
+				if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {
+					select {
+					case q <- buffer[:offset+ix]:
+					default:
+						logger.Printf("packet dropped (%d bytes discarded)", offset+ix)
+					}
+					rest = buffer[offset+ix:]
+					break
+				}
 				offset += n - WordLen
 			}
 		}
