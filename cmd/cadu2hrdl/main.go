@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -18,6 +19,8 @@ import (
 	"github.com/midbel/ringbuffer"
 	"golang.org/x/sync/errgroup"
 )
+
+var ErrSkip = errors.New("skip")
 
 var Word = []byte{0xf8, 0x2e, 0x35, 0x53}
 
@@ -243,17 +246,18 @@ func reassemble(addr string, n int) (<-chan []byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := c.SetReadBuffer(4 << 20); err != nil {
+	if err := c.SetReadBuffer(8 << 20); err != nil {
 		return nil, err
 	}
 	q := make(chan []byte, n)
 
-	rg := ringbuffer.NewRingSize(32<<20, 4<<20)
+	rg := ringbuffer.NewRingSize(64<<20, 8<<20)
 	go func() {
 		io.CopyBuffer(rg, c, make([]byte, 1024))
 	}()
 
 	go func() {
+		const row = "%4d packets, %4d skipped, %4d dropped, %6dKB discarded"
 		defer func() {
 			c.Close()
 			close(q)
@@ -261,6 +265,14 @@ func reassemble(addr string, n int) (<-chan []byte, error) {
 		logger := log.New(os.Stderr, "[assemble] ", 0)
 
 		r := erdle.NewReader(rg, false)
+		// tick := time.Tick(10 * time.Second)
+		// var (
+		// 	rest    []byte
+		// 	skipped int
+		// 	dropped int
+		// 	size    int
+		// 	count   int
+		// )
 		var rest []byte
 		for {
 			var offset int
@@ -273,18 +285,21 @@ func reassemble(addr string, n int) (<-chan []byte, error) {
 					if !erdle.IsMissingCadu(err) {
 						return
 					}
-					logger.Printf("buffer reset (%d bytes discarded): %v", len(buffer), err)
-					buffer, offset = buffer[:0], 0
-					// continue
+					// logger.Printf("buffer reset (%d bytes discarded): %v", len(buffer), err)
+					// buffer, offset = buffer[:0], 0
+					continue
 				}
 				buffer = append(buffer, block[:n]...)
 				if bytes.Equal(buffer[:WordLen], Word) {
 					offset = WordLen
 					break
-				} else if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {
-					buffer = buffer[offset+ix:]
-					offset = WordLen
-					break
+				}
+				if len(buffer[offset:]) > WordLen {
+					if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {
+						buffer = buffer[offset+ix:]
+						offset = WordLen
+						break
+					}
 				}
 				offset += n - WordLen
 			}
@@ -294,6 +309,7 @@ func reassemble(addr string, n int) (<-chan []byte, error) {
 					if !erdle.IsMissingCadu(err) {
 						return
 					}
+					rest = rest[:0]
 					logger.Printf("skip hrdl packet (%d bytes discarded): %v", len(buffer), err)
 					break
 				}
@@ -310,6 +326,82 @@ func reassemble(addr string, n int) (<-chan []byte, error) {
 				offset += n - WordLen
 			}
 		}
+		// for {
+		// 	buffer, err := startPacket(r, rest)
+		// 	if err != nil {
+		// 		return
+		// 	}
+		// 	buffer, rest, err = endPacket(r, buffer)
+		// 	switch err {
+		// 	case nil:
+		// 		select {
+		// 		case q <- buffer:
+		// 			count++
+		// 		default:
+		// 			dropped++
+		// 			size += len(buffer)
+		// 		}
+		// 	case ErrSkip:
+		// 		skipped++
+		// 		size += len(buffer)
+		// 	default:
+		// 		return
+		// 	}
+		// 	select {
+		// 	case <-tick:
+		// 		logger.Printf(row, count, skipped, dropped, size>>10)
+		// 		size, skipped, dropped, count = 0, 0, 0, 0
+		// 	default:
+		// 	}
+		// }
 	}()
 	return q, nil
+}
+
+func endPacket(r io.Reader, buffer []byte) ([]byte, []byte, error) {
+	block := make([]byte, 1008)
+	offset := len(buffer) - WordLen
+	for {
+		n, err := r.Read(block)
+		if err != nil {
+			if !erdle.IsMissingCadu(err) {
+				return nil, nil, err
+			} else {
+				return buffer, nil, ErrSkip
+			}
+		}
+		buffer = append(buffer, block[:n]...)
+		if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {
+			return buffer[:offset+ix], buffer[offset+ix:], nil
+		}
+		offset += n - WordLen
+	}
+}
+
+func startPacket(r io.Reader, rest []byte) ([]byte, error) {
+	var offset int
+	block := make([]byte, 1008)
+
+	buffer := make([]byte, 0, 4<<20)
+	if len(rest) > 0 {
+		buffer = append(buffer, rest...)
+	}
+	for {
+		n, err := r.Read(block)
+		if err != nil && !erdle.IsMissingCadu(err) {
+			return nil, err
+		}
+		buffer = append(buffer, block[:n]...)
+		if len(buffer) > WordLen && offset > WordLen {
+			if bytes.Equal(buffer[:WordLen], Word) {
+				break
+			}
+			if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {
+				buffer = buffer[offset+ix:]
+				break
+			}
+		}
+		offset += n - WordLen
+	}
+	return buffer, nil
 }

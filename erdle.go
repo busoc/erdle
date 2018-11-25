@@ -17,7 +17,7 @@ type MissingCaduError struct {
 }
 
 func (e MissingCaduError) Error() string {
-	return fmt.Sprintf("%d missing cadus (%d - %d)", e.To-e.From+1, e.From, e.To)
+	return fmt.Sprintf("%d missing cadus (%d - %d)", ((e.To-e.From)&caduCounterMask)+1, e.From, e.To)
 }
 
 type LengthError struct {
