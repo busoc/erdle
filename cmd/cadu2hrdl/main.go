@@ -198,7 +198,6 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 			errSum    int
 		)
 		for bs := range queue {
-			count++
 			size += len(bs)
 
 			z := int(binary.LittleEndian.Uint32(bs[4:])) + 12
@@ -222,6 +221,7 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 			}
 			select {
 			case q <- bs[8:]:
+				count++
 			default:
 				dropped++
 			}
