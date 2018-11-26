@@ -183,7 +183,7 @@ func main() {
 }
 
 func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
-	const row = "%4d packets, %4d dropped, %6dKB, %4d valid, %4d length error, %4d checksum error"
+	const row = "%6d packets, %4d dropped, %6dKB, %4d valid, %4d length error, %4d checksum error"
 	q := make(chan []byte, n)
 	go func() {
 		logger := log.New(os.Stderr, "[validate] ", 0)
@@ -227,6 +227,9 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 			}
 			select {
 			case <-tick:
+				if count == 0 {
+					break
+				}
 				valid := count - errLength - errSum
 				logger.Printf(row, count, dropped, size>>10, valid, errLength, errSum)
 				count, dropped, errLength, errSum, size = 0, 0, 0, 0, 0
@@ -257,7 +260,7 @@ func reassemble(addr string, n int) (<-chan []byte, error) {
 	}()
 
 	go func() {
-		const row = "%4d packets, %4d skipped, %4d dropped, %6dKB discarded"
+		const row = "%6d packets, %4d skipped, %4d dropped, %7d bytes discarded"
 		defer func() {
 			c.Close()
 			close(q)
@@ -293,7 +296,10 @@ func reassemble(addr string, n int) (<-chan []byte, error) {
 			}
 			select {
 			case <-tick:
-				logger.Printf(row, count, skipped, dropped, size>>10)
+				if count == 0 && skipped == 0 && dropped == 0 {
+					break
+				}
+				logger.Printf(row, count, skipped, dropped, size)
 				size, skipped, dropped, count = 0, 0, 0, 0
 			default:
 			}
@@ -317,18 +323,17 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 		}
 		buffer = append(buffer, block[:n]...)
 		if bytes.Equal(buffer[:WordLen], Word) {
-			offset = WordLen
 			break
 		}
 		if len(buffer[offset:]) > WordLen {
 			if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {
 				buffer = buffer[offset+ix:]
-				offset = WordLen
 				break
 			}
 		}
 		offset += n - WordLen
 	}
+	offset = WordLen
 	for {
 		n, err := r.Read(block)
 		if err != nil {
