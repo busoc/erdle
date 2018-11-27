@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"crypto/md5"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -12,7 +14,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/busoc/erdle"
@@ -32,14 +33,73 @@ const (
 	vmuVersion  = 2
 )
 
-type pool struct {
-	addr  string
-	queue chan net.Conn
-
-	writePacket func(io.Writer, uint16, []byte) (int, error)
-
-	sequence uint32
+type conn struct {
+	net.Conn
+	next     uint16
 	preamble uint16
+
+	writePacket func(*conn, []byte) (int, error)
+}
+
+func client(a string, i int) (net.Conn, error) {
+	var (
+		preamble  uint16
+		writeFunc func(*conn, []byte) (int, error)
+	)
+	switch i {
+	case 0, 1, 2, 255:
+		preamble = uint16(hdkVersion)<<12 | uint16(vmuVersion)<<8 | uint16(i)
+		writeFunc = writeHadock
+	case -1:
+		writeFunc = writeHRDL
+	default:
+		return nil, fmt.Errorf("invalid instance (%d)", i)
+	}
+	c, err := net.Dial(protoFromAddr(a))
+	if err != nil {
+		return nil, err
+	}
+	return &conn{
+		Conn:        c,
+		preamble:    preamble,
+		writePacket: writeFunc,
+	}, nil
+}
+
+func (c *conn) Write(bs []byte) (int, error) {
+	defer func() { c.next++ }()
+	return c.writePacket(c, bs)
+}
+
+func writeHRDL(c *conn, bs []byte) (int, error) {
+	var buf bytes.Buffer
+
+	buf.Write(Word)
+	binary.Write(&buf, binary.LittleEndian, uint32(len(bs))-4)
+	buf.Write(bs)
+
+	n, err := io.Copy(c.Conn, &buf)
+	return int(n), err
+}
+
+func writeHadock(c *conn, bs []byte) (int, error) {
+	var buf bytes.Buffer
+
+	buf.Write(Word)
+	binary.Write(&buf, binary.BigEndian, c.preamble)
+	binary.Write(&buf, binary.BigEndian, c.next)
+	binary.Write(&buf, binary.BigEndian, uint32(len(bs)))
+	buf.Write(bs)
+	binary.Write(&buf, binary.BigEndian, uint16(0xFFFF))
+
+	n, err := io.Copy(c.Conn, &buf)
+	return int(n), err
+}
+
+type pool struct {
+	addr     string
+	instance int
+	queue    chan net.Conn
 }
 
 func protoFromAddr(a string) (string, string) {
@@ -54,67 +114,29 @@ func NewPool(a string, n, i int) (*pool, error) {
 	if n <= 1 {
 		return nil, fmt.Errorf("number of connections too small")
 	}
-	var (
-		f func(io.Writer, uint16, []byte) (int, error)
-		p pool
-	)
-	switch i {
-	case 0, 1, 2, 255:
-		f = p.writeHadock
-	case -1:
-		f = p.writeHRDL
-	default:
-		return nil, fmt.Errorf("invalid instance")
-	}
 	q := make(chan net.Conn, n)
-	for i := 0; i < n; i++ {
-		c, err := net.Dial(protoFromAddr(a))
+	for j := 0; j < n; j++ {
+		c, err := client(a, i)
 		if err != nil {
 			return nil, err
 		}
 		q <- c
 	}
-	p = pool{
-		addr:        a,
-		queue:       q,
-		writePacket: f,
-		preamble:    uint16(hdkVersion)<<12 | uint16(vmuVersion)<<8 | uint16(i),
+	p := pool{
+		addr:     a,
+		queue:    q,
+		instance: i,
 	}
 	return &p, nil
 }
 
-func (p *pool) writeHRDL(w io.Writer, _ uint16, bs []byte) (int, error) {
-	var buf bytes.Buffer
-
-	buf.Write(Word)
-	binary.Write(&buf, binary.LittleEndian, uint32(len(bs))-4)
-	buf.Write(bs)
-
-	n, err := io.Copy(w, &buf)
-	return int(n), err
-}
-
-func (p *pool) writeHadock(w io.Writer, next uint16, bs []byte) (int, error) {
-	var buf bytes.Buffer
-
-	buf.Write(Word)
-	binary.Write(&buf, binary.BigEndian, p.preamble)
-	binary.Write(&buf, binary.BigEndian, next)
-	binary.Write(&buf, binary.BigEndian, uint32(len(bs)))
-	buf.Write(bs)
-	binary.Write(&buf, binary.BigEndian, uint16(0xFFFF))
-
-	n, err := io.Copy(w, &buf)
-	return int(n), err
-}
-
 func (p *pool) Write(bs []byte) (int, error) {
-	c, next, err := p.pop()
+	c, err := p.pop()
 	if err != nil {
 		return 0, err
 	}
 
-	n, err := p.writePacket(c, next, bs)
+	n, err := c.Write(bs)
 	if err != nil {
 		c.Close()
 	} else {
@@ -123,24 +145,13 @@ func (p *pool) Write(bs []byte) (int, error) {
 	return n, err
 }
 
-func (p *pool) pop() (net.Conn, uint16, error) {
-	var (
-		n   uint16
-		c   net.Conn
-		err error
-	)
-	x := atomic.AddUint32(&p.sequence, 1)
-	if v := x >> 16; v > 0 {
-		x = v
-	}
-	n = uint16(x)
+func (p *pool) pop() (net.Conn, error) {
 	select {
-	case x := <-p.queue:
-		c = x
+	case c := <-p.queue:
+		return c, nil
 	default:
-		c, err = net.Dial("tcp", p.addr)
+		return client(p.addr, p.instance)
 	}
-	return c, n, err
 }
 
 func (p *pool) push(c net.Conn) {
@@ -152,34 +163,112 @@ func (p *pool) push(c net.Conn) {
 }
 
 func main() {
+	log.SetFlags(0)
+	log.SetOutput(os.Stdout)
+
+	g := flag.String("g", "", "debug")
 	q := flag.Int("q", 64, "queue size before dropping HRDL packets")
 	c := flag.Int("c", 8, "number of connections to remote server")
 	i := flag.Int("i", -1, "hadock instance used")
 	k := flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
-	// f := flag.Bool("f", false, "fill missing cadus with zeros (not recommended)")
-	log.SetFlags(0)
-	log.SetOutput(os.Stdout)
+	x := flag.String("x", "", "proxy incoming cadus to a remote address")
 	flag.Parse()
+	switch *g {
+	default:
+		log.Fatalf("unsupported debug mode %s", *g)
+	case "hrdl":
+		queue, err := debugHRDL(flag.Arg(0), *q)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		dumpPackets(queue)
+	case "cadu", "vcdu":
+		queue, err := reassemble(flag.Arg(0), "", *q)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		dumpPackets(validate(queue, *q, *k))
+	case "":
+		p, err := NewPool(flag.Arg(1), *c, *i)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		queue, err := reassemble(flag.Arg(0), *x, *q)
+		if err != nil {
+			log.Fatalln(err)
+		}
 
-	p, err := NewPool(flag.Arg(1), *c, *i)
+		var gp errgroup.Group
+		for bs := range validate(queue, *q, *k) {
+			xs := bs
+			gp.Go(func() error {
+				_, err := p.Write(xs)
+				return err
+			})
+		}
+		if err := gp.Wait(); err != nil {
+			log.Fatalln(err)
+		}
+	}
+}
+
+func dumpPackets(queue <-chan []byte) {
+	var prev uint32
+	for i := 1; ; i++ {
+		select {
+		case bs, ok := <-queue:
+			if !ok {
+				return
+			}
+			curr := binary.LittleEndian.Uint32(bs[4:])
+			var missing uint32
+			if diff := curr - prev; diff > 1 {
+				missing = diff
+			}
+			prev = curr
+			log.Printf("%7d | %8d | %7d | %12d | %x | %x | %x", i, len(bs), curr, missing, bs[:16], bs[16:40], md5.Sum(bs[:len(bs)-4]))
+		}
+	}
+}
+
+func debugHRDL(a string, n int) (<-chan []byte, error) {
+	c, err := net.Listen(protoFromAddr(a))
 	if err != nil {
-		log.Fatalln(err)
+		return nil, err
 	}
-	queue, err := reassemble(flag.Arg(0), *q)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	var gp errgroup.Group
-	for bs := range validate(queue, *q, *k) {
-		xs := bs
-		gp.Go(func() error {
-			_, err := p.Write(xs)
-			return err
-		})
-	}
-	if err := gp.Wait(); err != nil {
-		log.Fatalln(err)
-	}
+	q := make(chan []byte, n)
+	go func() {
+		defer func() {
+			close(q)
+			c.Close()
+		}()
+		for {
+			c, err := c.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				r := bufio.NewReaderSize(c, 8<<20)
+
+				var size uint32
+				for {
+					binary.Read(r, binary.LittleEndian, &size)
+					binary.Read(r, binary.LittleEndian, &size)
+
+					bs := make([]byte, size+4)
+					if _, err := io.ReadFull(r, bs); err != nil {
+						return
+					}
+					select {
+					case q <- bs:
+					default:
+					}
+				}
+			}(c)
+		}
+	}()
+	return q, nil
 }
 
 func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
@@ -240,7 +329,7 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 	return q
 }
 
-func reassemble(addr string, n int) (<-chan []byte, error) {
+func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 	a, err := net.ResolveUDPAddr(protoFromAddr(addr))
 	if err != nil {
 		return nil, err
@@ -281,6 +370,9 @@ func reassemble(addr string, n int) (<-chan []byte, error) {
 			buffer, rest, err = nextPacket(r, rest)
 			switch err {
 			case nil:
+				if len(buffer) == 0 {
+					break
+				}
 				select {
 				case q <- buffer:
 					count++
