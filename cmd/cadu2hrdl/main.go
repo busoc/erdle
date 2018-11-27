@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"crypto/md5"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -176,8 +175,8 @@ func main() {
 	switch *g {
 	default:
 		log.Fatalf("unsupported debug mode %s", *g)
-	case "hrdl":
-		queue, err := debugHRDL(flag.Arg(0), *q)
+	case "hrdl", "hadock":
+		queue, err := debugHRDL(flag.Arg(0), *q, *i)
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -214,26 +213,30 @@ func main() {
 
 func dumpPackets(queue <-chan []byte) {
 	ps := make(map[byte]uint32)
-	for i := 1; ; i++ {
-		select {
-		case bs, ok := <-queue:
-			if !ok {
-				return
-			}
-			var missing uint32
 
-			c := bs[0]
-			curr := binary.LittleEndian.Uint32(bs[4:])
-			if diff := curr - ps[c]; diff > 1 {
-				missing = diff
-			}
-			ps[c] = curr
-			log.Printf("%7d | %8d | %7d | %12d | %x | %x | %x", i, len(bs)-4, curr, missing, bs[:16], bs[16:40], md5.Sum(bs[:len(bs)-4]))
+	for i := 1; ; i++ {
+		bs, ok := <-queue
+		if !ok {
+			return
 		}
+		var missing uint32
+
+		c := bs[0]
+		curr := binary.LittleEndian.Uint32(bs[4:])
+		if diff := curr - ps[c]; diff > 1 && diff < curr {
+			missing = diff
+		}
+		ps[c] = curr
+		var chk uint32
+		for i := 0; i < len(bs)-4; i++ {
+			chk += uint32(bs[i])
+		}
+		sum := binary.LittleEndian.Uint32(bs[len(bs)-4:])
+		log.Printf("%7d | %8d | %7d | %12d | %x | %08x | %08x", i, len(bs)-4, curr, missing, bs[:16], sum, chk)
 	}
 }
 
-func debugHRDL(a string, n int) (<-chan []byte, error) {
+func debugHRDL(a string, n, i int) (<-chan []byte, error) {
 	c, err := net.Listen(protoFromAddr(a))
 	if err != nil {
 		return nil, err
