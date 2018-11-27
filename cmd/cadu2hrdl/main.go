@@ -256,6 +256,14 @@ func debugHRDL(a string, n, i int) (<-chan []byte, error) {
 				defer c.Close()
 				r := bufio.NewReaderSize(c, 8<<20)
 
+				// var (
+				// 	size    uint32
+				// 	total   int
+				// 	skipped int
+				// 	count   int
+				// )
+				// tick := time.Tick(time.Second*10)
+				// logger := log.New(os.Stderr, "[debug]", 0)
 				var size uint32
 				for {
 					binary.Read(r, binary.LittleEndian, &size)
@@ -267,8 +275,17 @@ func debugHRDL(a string, n, i int) (<-chan []byte, error) {
 					}
 					select {
 					case q <- bs:
+						// total += len(bs)
+						// count++
 					default:
+						// skipped++
 					}
+					// select {
+					// case <-tick:
+					// 	logger.Printf("%6d packets, %6d skipped, %7dKB", count, skipped, total>>10)
+					// 	count, skipped, total = 0, 0, 0
+					// default:
+					// }
 				}
 			}(c)
 		}
@@ -352,6 +369,14 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 	go func() {
 		io.CopyBuffer(rg, c, make([]byte, 1024))
 	}()
+	var r io.Reader = rg
+	switch x, err := net.Dial(protoFromAddr(proxy)); {
+	case err == nil:
+		r = io.TeeReader(r, x)
+	case err != nil && proxy == "":
+	default:
+		return nil, err
+	}
 
 	go func() {
 		const row = "%6d packets, %4d skipped, %4d dropped, %7d bytes discarded"
@@ -361,7 +386,7 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 		}()
 		logger := log.New(os.Stderr, "[assemble] ", 0)
 
-		r := erdle.NewReader(rg, false)
+		r := erdle.NewReader(r, false)
 		tick := time.Tick(10 * time.Second)
 		var (
 			rest    []byte
@@ -389,6 +414,7 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 				skipped++
 				size += len(buffer)
 			default:
+				log.Println(err)
 				return
 			}
 			select {
