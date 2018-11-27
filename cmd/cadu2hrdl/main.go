@@ -213,20 +213,22 @@ func main() {
 }
 
 func dumpPackets(queue <-chan []byte) {
-	var prev uint32
+	ps := make(map[byte]uint32)
 	for i := 1; ; i++ {
 		select {
 		case bs, ok := <-queue:
 			if !ok {
 				return
 			}
-			curr := binary.LittleEndian.Uint32(bs[4:])
 			var missing uint32
-			if diff := curr - prev; diff > 1 {
+
+			c := bs[0]
+			curr := binary.LittleEndian.Uint32(bs[4:])
+			if diff := curr - ps[c]; diff > 1 {
 				missing = diff
 			}
-			prev = curr
-			log.Printf("%7d | %8d | %7d | %12d | %x | %x | %x", i, len(bs), curr, missing, bs[:16], bs[16:40], md5.Sum(bs[:len(bs)-4]))
+			ps[c] = curr
+			log.Printf("%7d | %8d | %7d | %12d | %x | %x | %x", i, len(bs)-4, curr, missing, bs[:16], bs[16:40], md5.Sum(bs[:len(bs)-4]))
 		}
 	}
 }
