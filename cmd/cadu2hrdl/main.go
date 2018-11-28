@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -161,32 +162,143 @@ func (p *pool) push(c net.Conn) {
 	}
 }
 
+type hrdp struct {
+	datadir string
+	payload uint8
+
+	file   *os.File
+	writer *bufio.Writer
+	tick   <-chan time.Time
+}
+
+func NewHRDP(dir string) (*hrdp, error) {
+	err := os.MkdirAll(dir, 0755)
+	if err != nil && !os.IsExist(err) {
+		return nil, err
+	}
+	hr := hrdp{
+		payload: 2,
+		datadir: dir,
+		tick:    time.Tick(time.Minute * 5),
+	}
+
+	hr.file, err = openFile(dir, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	hr.writer = bufio.NewWriter(hr.file)
+	return &hr, nil
+}
+
+func (h *hrdp) Filename() string {
+	return h.file.Name()
+}
+
+func (h *hrdp) Write(bs []byte) (int, error) {
+	select {
+	case t := <-h.tick:
+		if err := h.writer.Flush(); err != nil {
+			return 0, err
+		}
+		err := h.file.Close()
+		if err != nil {
+			return 0, err
+		}
+		h.file, err = openFile(h.datadir, t)
+		h.writer.Reset(h.file)
+	default:
+	}
+	n, c := time.Now().Unix(), bs[8]
+
+	var buf bytes.Buffer
+	binary.Write(&buf, binary.LittleEndian, uint32(len(bs)+14))
+	binary.Write(&buf, binary.BigEndian, uint16(0))
+	binary.Write(&buf, binary.BigEndian, h.payload)
+	binary.Write(&buf, binary.BigEndian, uint8(c))
+	binary.Write(&buf, binary.BigEndian, uint32(n))
+	binary.Write(&buf, binary.BigEndian, uint8(0))
+	binary.Write(&buf, binary.BigEndian, uint32(n))
+	binary.Write(&buf, binary.BigEndian, uint8(0))
+	buf.Write(bs)
+
+	if _, err := io.Copy(h.writer, &buf); err != nil {
+		return 0, err
+	}
+	return len(bs), nil
+}
+
+func openFile(dir string, t time.Time) (*os.File, error) {
+	y, d, h := t.Year(), t.YearDay(), t.Hour()
+	dir = filepath.Join(dir, fmt.Sprintf("%4d", y), fmt.Sprintf("%03d", d), fmt.Sprintf("%02d", h))
+	if err := os.MkdirAll(dir, 0755); err != nil && !os.IsExist(err) {
+		return nil, err
+	}
+	min := t.Truncate(time.Minute * 5).Minute()
+	n := fmt.Sprintf("rt_%02d_%02d.dat", min, min+4)
+	return os.Create(filepath.Join(dir, n))
+}
+
 func main() {
 	log.SetFlags(0)
 	log.SetOutput(os.Stdout)
 
-	g := flag.String("g", "", "debug")
+	m := flag.String("m", "", "mode")
 	q := flag.Int("q", 64, "queue size before dropping HRDL packets")
 	c := flag.Int("c", 8, "number of connections to remote server")
 	i := flag.Int("i", -1, "hadock instance used")
 	k := flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
 	x := flag.String("x", "", "proxy incoming cadus to a remote address")
 	flag.Parse()
-	switch *g {
+	switch *m {
 	default:
-		log.Fatalf("unsupported debug mode %s", *g)
+		log.Fatalf("unsupported mode %s", *m)
+	case "hrdp":
+		hr, err := NewHRDP(flag.Arg(1))
+		if err != nil {
+			log.Fatalln(err)
+		}
+		queue, err := reassemble(flag.Arg(0), "", *q)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		tick := time.Tick(time.Second)
+		var (
+			count int
+			size  int
+			fail  int
+		)
+		logger := log.New(os.Stderr, "[hrdp] ", 0)
+		for bs := range validate(queue, *q, *k) {
+			if n, err := hr.Write(bs); err != nil {
+				fail++
+				log.Println(err)
+			} else {
+				count++
+				size += n
+			}
+			select {
+			case <-tick:
+				logger.Printf("%6d packets (%s), %7dKB, %6d failures", count, hr.Filename(), size>>10, fail)
+				count, size, fail = 0, 0, 0
+			default:
+			}
+		}
 	case "hrdl", "hadock":
 		queue, err := debugHRDL(flag.Arg(0), *q, *i)
 		if err != nil {
 			log.Fatalln(err)
 		}
-		dumpPackets(queue)
+		if err := dumpPackets(queue, *i); err != nil {
+			log.Fatalln(err)
+		}
 	case "cadu", "vcdu":
 		queue, err := reassemble(flag.Arg(0), "", *q)
 		if err != nil {
 			log.Fatalln(err)
 		}
-		dumpPackets(validate(queue, *q, *k))
+		if err := dumpPackets(validate(queue, *q, *k), *i); err != nil {
+			log.Fatalln(err)
+		}
 	case "":
 		p, err := NewPool(flag.Arg(1), *c, *i)
 		if err != nil {
@@ -211,13 +323,30 @@ func main() {
 	}
 }
 
-func dumpPackets(queue <-chan []byte) {
+func dumpPackets(queue <-chan []byte, i int) error {
+	var kind, instance string
+	switch i {
+	case 0, 1, 2, 255:
+		kind = "HDK"
+		switch i {
+		case 0:
+			instance = "TEST"
+		case 1, 2:
+			instance = fmt.Sprintf("SIM%d", i)
+		case 255:
+			instance = "OPS"
+		}
+	case -1:
+		kind, instance = "HRDL", "-"
+	default:
+		return fmt.Errorf("unsupported instance %d", i)
+	}
 	ps := make(map[byte]uint32)
 
 	for i := 1; ; i++ {
 		bs, ok := <-queue
 		if !ok {
-			return
+			return nil
 		}
 		var missing uint32
 
@@ -232,8 +361,9 @@ func dumpPackets(queue <-chan []byte) {
 			chk += uint32(bs[i])
 		}
 		sum := binary.LittleEndian.Uint32(bs[len(bs)-4:])
-		log.Printf("%7d | %8d | %7d | %12d | %x | %08x | %08x", i, len(bs)-4, curr, missing, bs[:16], sum, chk)
+		log.Printf("%5s | %5s | %7d | %8d | %7d | %12d | %x | %08x | %08x", kind, instance, i, len(bs)-4, curr, missing, bs[:16], sum, chk)
 	}
+	return nil
 }
 
 func debugHRDL(a string, n, i int) (<-chan []byte, error) {
@@ -241,6 +371,7 @@ func debugHRDL(a string, n, i int) (<-chan []byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	q := make(chan []byte, n)
 	go func() {
 		defer func() {
@@ -256,14 +387,6 @@ func debugHRDL(a string, n, i int) (<-chan []byte, error) {
 				defer c.Close()
 				r := bufio.NewReaderSize(c, 8<<20)
 
-				// var (
-				// 	size    uint32
-				// 	total   int
-				// 	skipped int
-				// 	count   int
-				// )
-				// tick := time.Tick(time.Second*10)
-				// logger := log.New(os.Stderr, "[debug]", 0)
 				var size uint32
 				for {
 					binary.Read(r, binary.LittleEndian, &size)
@@ -275,17 +398,8 @@ func debugHRDL(a string, n, i int) (<-chan []byte, error) {
 					}
 					select {
 					case q <- bs:
-						// total += len(bs)
-						// count++
 					default:
-						// skipped++
 					}
-					// select {
-					// case <-tick:
-					// 	logger.Printf("%6d packets, %6d skipped, %7dKB", count, skipped, total>>10)
-					// 	count, skipped, total = 0, 0, 0
-					// default:
-					// }
 				}
 			}(c)
 		}
