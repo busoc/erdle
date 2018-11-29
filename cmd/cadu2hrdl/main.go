@@ -17,13 +17,17 @@ import (
 	"time"
 
 	"github.com/busoc/erdle"
+	"github.com/juju/ratelimit"
 	"github.com/midbel/ringbuffer"
 	"golang.org/x/sync/errgroup"
 )
 
 var ErrSkip = errors.New("skip")
 
-var Word = []byte{0xf8, 0x2e, 0x35, 0x53}
+var (
+	Word  = []byte{0xf8, 0x2e, 0x35, 0x53}
+	Magic = []byte{0x1a, 0xcf, 0xfc, 0x1d}
+)
 
 const WordLen = 4
 
@@ -252,6 +256,14 @@ func main() {
 	switch *m {
 	default:
 		log.Fatalf("unsupported mode %s", *m)
+	case "replay":
+		if err := replayCadus(flag.Arg(0), flag.Arg(1), *q, *c); err != nil {
+			log.Fatalln(err)
+		}
+	case "debug":
+		if err := traceCadus(flag.Arg(0)); err != nil {
+			log.Fatalln(err)
+		}
 	case "hrdp":
 		hr, err := NewHRDP(flag.Arg(1))
 		if err != nil {
@@ -321,6 +333,115 @@ func main() {
 			log.Fatalln(err)
 		}
 	}
+}
+
+func replayCadus(addr, file string, rate, skip int) error {
+	f, err := os.Open(file)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	c, err := net.Dial(protoFromAddr(addr))
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	var w io.Writer
+	if rate > 0 {
+		w = ratelimit.Writer(c, ratelimit.NewBucketWithRate(float64(rate), int64(rate)))
+	} else {
+		w = c
+	}
+	r := bufio.NewReader(f)
+
+	tick := time.Tick(time.Second)
+	logger := log.New(os.Stderr, "[replay] ", 0)
+
+	var size, count int
+	for {
+		if _, err := r.Discard(skip); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+		if n, err := io.CopyN(w, r, 1024); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		} else {
+			size += int(n)
+			count++
+		}
+		select {
+		case <-tick:
+			logger.Printf("%6d packets, %dKB", count, size>>10)
+			size, count = 0, 0
+		default:
+		}
+	}
+	return nil
+}
+
+func traceCadus(addr string) error {
+	a, err := net.ResolveUDPAddr(protoFromAddr(addr))
+	if err != nil {
+		return err
+	}
+	c, err := net.ListenUDP("udp", a)
+	if err != nil {
+		return err
+	}
+	if err := c.SetReadBuffer(16 << 20); err != nil {
+		return err
+	}
+	tick := time.Tick(time.Second)
+	logger := log.New(os.Stderr, "[debug] ", 0)
+
+	// rg := ringbuffer.NewRingSize(64<<20, 8<<20)
+	// go func() {
+	// 	io.CopyBuffer(rg, c, make([]byte, 1024))
+	// }()
+	var (
+		count    int
+		size     int
+		errSize  int
+		errMagic int
+		missing  uint32
+		prev     uint32
+	)
+	body := make([]byte, 1024)
+	for {
+		n, err := c.Read(body)
+		if err != nil {
+			return err
+		}
+
+		switch {
+		case n < len(body):
+			errSize++
+		case !bytes.Equal(body[:4], Magic):
+			errMagic++
+		}
+		curr := binary.BigEndian.Uint32(body[6:]) >> 8
+		if diff := (curr - prev) & 0xFFFFFF; curr != diff && diff > 1 {
+			missing += diff
+		}
+		prev = curr
+
+		count++
+		size += n
+		select {
+		case <-tick:
+			logger.Printf("%6d packets, %8d missing, %8d size error, %8d magic error, %6dKB", count, missing, errSize, errMagic, size)
+			count, size, missing, errSize, errMagic = 0, 0, 0, 0, 0
+		default:
+		}
+	}
+	return nil
 }
 
 func dumpPackets(queue <-chan []byte, i int) error {
