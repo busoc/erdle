@@ -26,6 +26,7 @@ var ErrSkip = errors.New("skip")
 
 var (
 	Word  = []byte{0xf8, 0x2e, 0x35, 0x53}
+	Stuff = []byte{0xf8, 0x2e, 0x35, 0xaa, 0x53}
 	Magic = []byte{0x1a, 0xcf, 0xfc, 0x1d}
 )
 
@@ -186,7 +187,7 @@ func NewHRDP(dir string) (*hrdp, error) {
 		tick:    time.Tick(time.Minute * 5),
 	}
 
-	hr.file, err = openFile(dir, time.Now())
+	hr.file, err = createHRDPFile(dir, time.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +209,7 @@ func (h *hrdp) Write(bs []byte) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		h.file, err = openFile(h.datadir, t)
+		h.file, err = createHRDPFile(h.datadir, t)
 		h.writer.Reset(h.file)
 	default:
 	}
@@ -231,7 +232,7 @@ func (h *hrdp) Write(bs []byte) (int, error) {
 	return len(bs), nil
 }
 
-func openFile(dir string, t time.Time) (*os.File, error) {
+func createHRDPFile(dir string, t time.Time) (*os.File, error) {
 	y, d, h := t.Year(), t.YearDay(), t.Hour()
 	dir = filepath.Join(dir, fmt.Sprintf("%4d", y), fmt.Sprintf("%03d", d), fmt.Sprintf("%02d", h))
 	if err := os.MkdirAll(dir, 0755); err != nil && !os.IsExist(err) {
@@ -247,6 +248,7 @@ func main() {
 	log.SetOutput(os.Stdout)
 
 	m := flag.String("m", "", "mode")
+	b := flag.String("b", "", "by")
 	q := flag.Int("q", 64, "queue size before dropping HRDL packets")
 	c := flag.Int("c", 8, "number of connections to remote server")
 	i := flag.Int("i", -1, "hadock instance used")
@@ -258,6 +260,14 @@ func main() {
 		log.Fatalf("unsupported mode %s", *m)
 	case "replay":
 		if err := replayCadus(flag.Arg(0), flag.Arg(1), *q, *c); err != nil {
+			log.Fatalln(err)
+		}
+	case "count":
+		if err := countHRDL(flag.Args(), *b, *c); err != nil {
+			log.Fatalln(err)
+		}
+	case "list":
+		if err := listHRDL(flag.Args(), *c); err != nil {
 			log.Fatalln(err)
 		}
 	case "debug":
@@ -311,7 +321,7 @@ func main() {
 		if err := dumpPackets(validate(queue, *q, *k), *i); err != nil {
 			log.Fatalln(err)
 		}
-	case "":
+	case "", "relay":
 		p, err := NewPool(flag.Arg(1), *c, *i)
 		if err != nil {
 			log.Fatalln(err)
@@ -333,6 +343,169 @@ func main() {
 			log.Fatalln(err)
 		}
 	}
+}
+
+type multiReader struct {
+	file  *os.File
+	files []string
+}
+
+func MultiReader(ps []string) (io.Reader, error) {
+	if len(ps) == 0 {
+		return nil, fmt.Errorf("no files given")
+	}
+	f, err := os.Open(ps[0])
+	if err != nil {
+		return nil, err
+	}
+	m := multiReader{file: f}
+	if len(ps) > 1 {
+		m.files = append(m.files, ps[1:]...)
+	}
+	return &m, nil
+}
+
+func (m *multiReader) Read(bs []byte) (int, error) {
+	if len(m.files) == 0 && m.file == nil {
+		return 0, io.EOF
+	}
+	n, err := m.file.Read(bs)
+	if err == io.EOF {
+		m.file.Close()
+		if len(m.files) > 0 {
+			if m.file, err = os.Open(m.files[0]); err != nil {
+				return 0, err
+			}
+			if len(m.files) == 1 {
+				m.files = m.files[:0]
+			} else {
+				m.files = m.files[1:]
+			}
+			return 0, nil
+		} else {
+			m.file = nil
+		}
+	}
+	return n, err
+}
+
+type vcduReader struct {
+	skip    int
+	inner   io.Reader
+	counter uint32
+	body    bool
+}
+
+func CaduReader(r io.Reader, skip int) io.Reader {
+	return &vcduReader{
+		skip: skip,
+		inner: r,
+		body: true,
+	}
+}
+
+func VCDUReader(r io.Reader, skip int) io.Reader {
+	return &vcduReader{
+		skip: skip,
+		inner: r,
+	}
+}
+
+func (r *vcduReader) Read(bs []byte) (int, error) {
+	xs := make([]byte, r.skip+1024)
+	n, err := r.inner.Read(xs)
+	if err != nil {
+		return n, err
+	}
+	n = copy(bs, xs[r.skip:])
+
+	curr := binary.BigEndian.Uint32(bs[6:]) >> 8
+	if diff := (curr - r.counter) & 0xFFFFFF; diff != curr && diff > 1 {
+		err = erdle.MissingCaduError{From: r.counter, To: curr}
+	}
+	r.counter = curr
+	if r.body {
+		n = copy(bs, xs[r.skip+14:r.skip+1022])
+	}
+	return n, err
+}
+
+type hrdlReader struct {
+	inner io.Reader
+	rest  []byte
+}
+
+func HRDLReader(r io.Reader, skip int) io.Reader {
+	return &hrdlReader{inner: CaduReader(r, skip)}
+}
+
+func (r *hrdlReader) Read(bs []byte) (int, error) {
+	buffer, rest, err := nextPacket(r.inner, r.rest)
+	switch err {
+	case nil:
+		n := copy(bs, buffer)
+		r.rest = rest
+
+		return n, err
+	case ErrSkip:
+		return r.Read(bs)
+	default:
+		return 0, err
+	}
+}
+
+func countHRDL(files []string, by string, skip int) error {
+	var byFunc func(bs []byte) (byte, uint32)
+	switch by {
+	case "", "origin":
+		byFunc = func(bs []byte) (byte, uint32) {
+			return 0, 0
+		}
+	case "channel":
+		byFunc = func(bs []byte) (byte, uint32) {
+			return 0, 0
+		}
+	default:
+		return fmt.Errorf("unrecognized value %s", by)
+	}
+	m, err := MultiReader(files)
+	if err != nil {
+		return err
+	}
+
+	r := HRDLReader(m, skip)
+	body := make([]byte, 8<<20)
+	for i := 1; ; i++ {
+		_, err := r.Read(body)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+
+	}
+}
+
+func listHRDL(files []string, skip int) error {
+	m, err := MultiReader(files)
+	if err != nil {
+		return err
+	}
+
+	r := HRDLReader(m, skip)
+	body := make([]byte, 8<<20)
+	for i := 1; ; i++ {
+		_, err := r.Read(body)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+		log.Printf("%6d - %x - %x - %x", i, body[:8], body[8:24], body[24:48])
+	}
+	return nil
 }
 
 func replayCadus(addr, file string, rate, skip int) error {
@@ -565,8 +738,9 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 					errSum++
 				}
 			}
+			xs := append(bs[8:], bytes.Replace(bs[8:], Stuff, Word, -1)...)
 			select {
-			case q <- bs[8:]:
+			case q <- append(xs, bs[len(bs)-4:]...):
 				count++
 			default:
 				dropped++
@@ -654,9 +828,6 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 			}
 			select {
 			case <-tick:
-				if count == 0 && skipped == 0 && dropped == 0 {
-					break
-				}
 				logger.Printf(row, count, skipped, dropped, size)
 				size, skipped, dropped, count = 0, 0, 0, 0
 			default:
@@ -670,7 +841,7 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 	var offset int
 
 	block, buffer := make([]byte, 1008), rest
-	rest = rest[:0]
+	// rest = rest[:0]
 	for {
 		n, err := r.Read(block)
 		if err != nil {
