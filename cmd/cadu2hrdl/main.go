@@ -441,11 +441,19 @@ func HRDLReader(r io.Reader, skip int) io.Reader {
 
 func (r *hrdlReader) Read(bs []byte) (int, error) {
 	buffer, rest, err := nextPacket(r.inner, r.rest)
+	r.rest = r.rest[:0]
 	switch err {
 	case nil:
 		n := copy(bs, buffer)
 		r.rest = rest
 
+		// z := binary.LittleEndian.Uint32(buffer[4:]) + 12
+		// switch x := len(buffer); {
+		// default:
+		// case x > z:
+		// 	buffer[:z]
+		// case x < z:
+		// }
 		return n, err
 	case ErrSkip:
 		return r.Read(bs)
@@ -454,16 +462,28 @@ func (r *hrdlReader) Read(bs []byte) (int, error) {
 	}
 }
 
+type coze struct {
+	Count   int
+	Size    int
+	Missing uint32
+}
+
+func (c *coze) Update(z *coze) {
+	c.Count += z.Count
+	c.Size += z.Size
+	c.Missing += z.Missing
+}
+
 func countHRDL(files []string, by string, skip int) error {
 	var byFunc func(bs []byte) (byte, uint32)
 	switch by {
-	case "", "origin":
+	case "origin":
 		byFunc = func(bs []byte) (byte, uint32) {
-			return 0, 0
+			return bs[39], binary.LittleEndian.Uint32(bs[19:])
 		}
-	case "channel":
+	case "channel", "":
 		byFunc = func(bs []byte) (byte, uint32) {
-			return 0, 0
+			return bs[0], binary.LittleEndian.Uint32(bs[4:])
 		}
 	default:
 		return fmt.Errorf("unrecognized value %s", by)
@@ -472,6 +492,9 @@ func countHRDL(files []string, by string, skip int) error {
 	if err != nil {
 		return err
 	}
+
+	zs := make(map[byte]*coze)
+	ps := make(map[byte]uint32)
 
 	r := HRDLReader(m, skip)
 	body := make([]byte, 8<<20)
@@ -483,8 +506,21 @@ func countHRDL(files []string, by string, skip int) error {
 			}
 			return err
 		}
+		i, s := byFunc(body[8:])
+		if _, ok := zs[i]; !ok {
+			zs[i] = &coze{}
+		}
 
+		zs[i].Count++
+		zs[i].Size += len(body) - 12
+		if diff := s - ps[i]; diff != s && diff > 1 {
+			zs[i].Missing += diff-1
+		}
 	}
+	for i, e := range zs {
+		log.Printf("%02x: %7d packets, %7d missing, %7dKB", i, e.Count, e.Missing, e.Size>>10)
+	}
+	return nil
 }
 
 func listHRDL(files []string, skip int) error {
