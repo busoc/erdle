@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/midbel/ringbuffer"
@@ -147,30 +148,43 @@ func main() {
 }
 
 func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
-	const row = "%6d packets, %4d dropped, %6dKB, %4d valid, %4d length error, %4d checksum error"
+	var (
+		count     int64
+		size      int64
+		dropped   int64
+		errLength int64
+		errSum    int64
+	)
+	go func() {
+		const row = "%6d packets, %4d dropped, %6dKB, %4d valid, %4d length error, %4d checksum error"
+		logger := log.New(os.Stderr, "[validate] ", 0)
+
+		tick := time.Tick(time.Second)
+		for range tick {
+			valid := count - errLength - errSum
+			if count > 0 {
+				logger.Printf(row, atomic.LoadInt64(&count), atomic.LoadInt64(&dropped), atomic.LoadInt64(&size)>>10, atomic.LoadInt64(&valid), atomic.LoadInt64(&errLength), atomic.LoadInt64(&errSum))
+			}
+			atomic.StoreInt64(&count, 0)
+			atomic.StoreInt64(&dropped, 0)
+			atomic.StoreInt64(&errLength, 0)
+			atomic.StoreInt64(&errSum, 0)
+			atomic.StoreInt64(&size, 0)
+		}
+	}()
 	q := make(chan []byte, n)
 	go func() {
-		logger := log.New(os.Stderr, "[validate] ", 0)
 		defer close(q)
-		tick := time.Tick(time.Second)
 
-		var (
-			count     int
-			size      int
-			dropped   int
-			errLength int
-			errSum    int
-		)
 		for bs := range queue {
-			size += len(bs)
-
+			atomic.AddInt64(&size, int64(len(bs)))
 			z := int(binary.LittleEndian.Uint32(bs[4:])) + 12
 			switch {
 			default:
 			case z < len(bs):
 				bs = bs[:z]
 			case z > len(bs):
-				errLength++
+				atomic.AddInt64(&errLength, 1)
 				continue
 			}
 			if keep {
@@ -180,21 +194,14 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 					chk += uint32(bs[i])
 				}
 				if chk != sum {
-					errSum++
+					atomic.AddInt64(&errSum, 1)
 				}
 			}
 			select {
 			case q <- bs[8:]:
-				count++
+				atomic.AddInt64(&count, 1)
 			default:
-				dropped++
-			}
-			select {
-			case <-tick:
-				valid := count - errLength - errSum
-				logger.Printf(row, count, dropped, size>>10, valid, errLength, errSum)
-				count, dropped, errLength, errSum, size = 0, 0, 0, 0, 0
-			default:
+				atomic.AddInt64(&dropped, 1)
 			}
 		}
 	}()
@@ -215,7 +222,7 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 	}
 	q := make(chan []byte, n)
 
-	rg := ringbuffer.NewRingSize(64<<20, 8<<20)
+	rg := ringbuffer.NewRingSize(64<<20, 0)
 	go func() {
 		io.CopyBuffer(rg, c, make([]byte, 1024))
 	}()
@@ -229,24 +236,31 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 		return nil, err
 	}
 
+	var skipped, dropped, size, count int64
 	go func() {
 		const row = "%6d packets, %4d skipped, %4d dropped, %7d bytes discarded"
+
+		logger := log.New(os.Stderr, "[assemble] ", 0)
+		tick := time.Tick(5 * time.Second)
+		for range tick {
+			if count > 0 {
+				logger.Printf(row, atomic.LoadInt64(&count), atomic.LoadInt64(&skipped), atomic.LoadInt64(&dropped), atomic.LoadInt64(&size))
+			}
+			atomic.StoreInt64(&size, 0)
+			atomic.StoreInt64(&skipped, 0)
+			atomic.StoreInt64(&dropped, 0)
+			atomic.StoreInt64(&count, 0)
+			// size, skipped, dropped, count = 0, 0, 0, 0
+		}
+	}()
+
+	go func() {
 		defer func() {
 			c.Close()
 			close(q)
 		}()
-		logger := log.New(os.Stderr, "[assemble] ", 0)
-
+		var buffer, rest  []byte
 		r := CaduReader(r, 0)
-		tick := time.Tick(10 * time.Second)
-		var (
-			rest    []byte
-			buffer  []byte
-			skipped int
-			dropped int
-			size    int
-			count   int
-		)
 		for {
 			buffer, rest, err = nextPacket(r, rest)
 			switch err {
@@ -256,23 +270,17 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 				}
 				select {
 				case q <- buffer:
-					count++
+					atomic.AddInt64(&count, 1)
 				default:
-					dropped++
-					size += len(buffer)
+					atomic.AddInt64(&dropped, 1)
+					atomic.AddInt64(&size, int64(len(buffer)))
 				}
 			case ErrSkip:
-				skipped++
-				size += len(buffer)
+				atomic.AddInt64(&skipped, 1)
+				atomic.AddInt64(&size, int64(len(buffer)))
 			default:
 				log.Println(err)
 				return
-			}
-			select {
-			case <-tick:
-				logger.Printf(row, count, skipped, dropped, size)
-				size, skipped, dropped, count = 0, 0, 0, 0
-			default:
 			}
 		}
 	}()
