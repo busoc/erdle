@@ -162,14 +162,15 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 		tick := time.Tick(time.Second)
 		for range tick {
 			valid := count - errLength - errSum
-			if count > 0 {
+			if count > 0 || dropped > 0 {
 				logger.Printf(row, atomic.LoadInt64(&count), atomic.LoadInt64(&dropped), atomic.LoadInt64(&size)>>10, atomic.LoadInt64(&valid), atomic.LoadInt64(&errLength), atomic.LoadInt64(&errSum))
+				
+				atomic.StoreInt64(&count, 0)
+				atomic.StoreInt64(&dropped, 0)
+				atomic.StoreInt64(&errLength, 0)
+				atomic.StoreInt64(&errSum, 0)
+				atomic.StoreInt64(&size, 0)
 			}
-			atomic.StoreInt64(&count, 0)
-			atomic.StoreInt64(&dropped, 0)
-			atomic.StoreInt64(&errLength, 0)
-			atomic.StoreInt64(&errSum, 0)
-			atomic.StoreInt64(&size, 0)
 		}
 	}()
 	q := make(chan []byte, n)
@@ -243,14 +244,14 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 		logger := log.New(os.Stderr, "[assemble] ", 0)
 		tick := time.Tick(5 * time.Second)
 		for range tick {
-			if count > 0 {
+			if count > 0 || skipped > 0 {
 				logger.Printf(row, atomic.LoadInt64(&count), atomic.LoadInt64(&skipped), atomic.LoadInt64(&dropped), atomic.LoadInt64(&size))
+
+				atomic.StoreInt64(&size, 0)
+				atomic.StoreInt64(&skipped, 0)
+				atomic.StoreInt64(&dropped, 0)
+				atomic.StoreInt64(&count, 0)
 			}
-			atomic.StoreInt64(&size, 0)
-			atomic.StoreInt64(&skipped, 0)
-			atomic.StoreInt64(&dropped, 0)
-			atomic.StoreInt64(&count, 0)
-			// size, skipped, dropped, count = 0, 0, 0, 0
 		}
 	}()
 
