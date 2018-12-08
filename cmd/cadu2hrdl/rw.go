@@ -137,7 +137,12 @@ func (r *hrdlReader) Read(bs []byte) (int, error) {
 func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 	var offset int
 
-	block, buffer := make([]byte, 1008), rest
+	// block, buffer := make([]byte, 1008), rest
+	var buffer []byte
+	if len(rest) > 0 {
+		buffer = append(buffer, rest...)
+	}
+	block := make([]byte, 1008)
 	// rest = rest[:0]
 	for {
 		n, err := r.Read(block)
