@@ -237,18 +237,18 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 		return nil, err
 	}
 
-	var dropped, size, count, errCRC, errMissing int64
+	var dropped, skipped, size, count, errCRC, errMissing int64
 	go func() {
 		const row = "%6d packets, %4d skipped, %4d dropped, %7d missing, %7d crc error, %7d bytes discarded"
 
 		logger := log.New(os.Stderr, "[assemble] ", 0)
 		tick := time.Tick(5 * time.Second)
 		for range tick {
-			if count > 0 || errMissing > 0 || errCRC > 0 {
-				skipped := errMissing + errCRC
-				logger.Printf(row, atomic.LoadInt64(&count), skipped, atomic.LoadInt64(&dropped), atomic.LoadInt64(&errMissing), atomic.LoadInt64(&errCRC), atomic.LoadInt64(&size))
+			if count > 0 || skipped > 0 {
+				logger.Printf(row, atomic.LoadInt64(&count), atomic.LoadInt64(&skipped), atomic.LoadInt64(&dropped), atomic.LoadInt64(&errMissing), atomic.LoadInt64(&errCRC), atomic.LoadInt64(&size))
 
 				atomic.StoreInt64(&size, 0)
+				atomic.StoreInt64(&skipped, 0)
 				atomic.StoreInt64(&errMissing, 0)
 				atomic.StoreInt64(&errCRC, 0)
 				atomic.StoreInt64(&dropped, 0)
@@ -279,9 +279,11 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 				}
 			} else if n, ok := IsMissingCadu(err); ok {
 				atomic.AddInt64(&errMissing, int64(n))
+				atomic.AddInt64(&skipped, 1)
 				atomic.AddInt64(&size, int64(len(buffer)))
 			} else if IsCRCError(err) {
 				atomic.AddInt64(&errCRC, 1)
+				atomic.AddInt64(&skipped, 1)
 				atomic.AddInt64(&size, int64(len(buffer)))
 			} else {
 				log.Println(err)
