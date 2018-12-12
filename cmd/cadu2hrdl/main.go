@@ -164,7 +164,7 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 			valid := count - errLength - errSum
 			if count > 0 || dropped > 0 {
 				logger.Printf(row, atomic.LoadInt64(&count), atomic.LoadInt64(&dropped), atomic.LoadInt64(&size)>>10, atomic.LoadInt64(&valid), atomic.LoadInt64(&errLength), atomic.LoadInt64(&errSum))
-				
+
 				atomic.StoreInt64(&count, 0)
 				atomic.StoreInt64(&dropped, 0)
 				atomic.StoreInt64(&errLength, 0)
@@ -237,18 +237,20 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 		return nil, err
 	}
 
-	var skipped, dropped, size, count int64
+	var dropped, size, count, errCRC, errMissing int64
 	go func() {
-		const row = "%6d packets, %4d skipped, %4d dropped, %7d bytes discarded"
+		const row = "%6d packets, %4d skipped, %4d dropped, %7d missing, %7d crc error, %7d bytes discarded"
 
 		logger := log.New(os.Stderr, "[assemble] ", 0)
 		tick := time.Tick(5 * time.Second)
 		for range tick {
-			if count > 0 || skipped > 0 {
-				logger.Printf(row, atomic.LoadInt64(&count), atomic.LoadInt64(&skipped), atomic.LoadInt64(&dropped), atomic.LoadInt64(&size))
+			if count > 0 || errMissing > 0 || errCRC > 0 {
+				skipped := errMissing + errCRC
+				logger.Printf(row, atomic.LoadInt64(&count), skipped, atomic.LoadInt64(&dropped), atomic.LoadInt64(&errMissing), atomic.LoadInt64(&errCRC), atomic.LoadInt64(&size))
 
 				atomic.StoreInt64(&size, 0)
-				atomic.StoreInt64(&skipped, 0)
+				atomic.StoreInt64(&errMissing, 0)
+				atomic.StoreInt64(&errCRC, 0)
 				atomic.StoreInt64(&dropped, 0)
 				atomic.StoreInt64(&count, 0)
 			}
@@ -264,10 +266,9 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 		r := CaduReader(r, 0)
 		for {
 			buffer, rest, err = nextPacket(r, rest)
-			switch err {
-			case nil:
+			if err == nil {
 				if len(buffer) == 0 {
-					break
+					continue
 				}
 				select {
 				case q <- buffer:
@@ -276,10 +277,13 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 					atomic.AddInt64(&dropped, 1)
 					atomic.AddInt64(&size, int64(len(buffer)))
 				}
-			case ErrSkip:
-				atomic.AddInt64(&skipped, 1)
+			} else if n, ok := IsMissingCadu(err); ok {
+				atomic.AddInt64(&errMissing, int64(n))
 				atomic.AddInt64(&size, int64(len(buffer)))
-			default:
+			} else if IsCRCError(err) {
+				atomic.AddInt64(&errCRC, 1)
+				atomic.AddInt64(&size, int64(len(buffer)))
+			} else {
 				log.Println(err)
 				return
 			}

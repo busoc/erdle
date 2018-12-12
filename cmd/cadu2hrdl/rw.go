@@ -26,9 +26,9 @@ func (c CRCError) Error() string {
 	return fmt.Sprintf("invalid crc: want %04x, got %04x", c.Want, c.Got)
 }
 
-func IsMissingCadu(err error) bool {
-	_, ok := err.(MissingCaduError)
-	return ok
+func IsMissingCadu(err error) (int, bool) {
+	e, ok := err.(MissingCaduError)
+	return int((e.To-e.From)&0xFFFFFF), ok
 }
 
 func IsCRCError(err error) bool {
@@ -37,7 +37,8 @@ func IsCRCError(err error) bool {
 }
 
 func IsCaduError(err error) bool {
-	return IsMissingCadu(err) || IsCRCError(err)
+	_, ok := IsMissingCadu(err)
+	return ok || IsCRCError(err)
 }
 
 type multiReader struct {
@@ -187,10 +188,11 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 	for {
 		n, err := r.Read(block)
 		if err != nil {
-			if !IsCaduError(err) {
-				return nil, nil, err
-			}
-			return nil, nil, ErrSkip
+			// if !IsCaduError(err) {
+			// } else {
+			// 	return nil, nil, ErrSkip
+			// }
+			return nil, nil, err
 		}
 		buffer = append(buffer, block[:n]...)
 		if bytes.Equal(buffer[:WordLen], Word) {
@@ -208,11 +210,11 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 	for {
 		n, err := r.Read(block)
 		if err != nil {
-			if !IsCaduError(err) {
-				return nil, nil, err
-			} else {
-				return nil, nil, ErrSkip
-			}
+			return nil, nil, err
+			// if !IsCaduError(err) {
+			// } else {
+			// 	return nil, nil, ErrSkip
+			// }
 		}
 		buffer = append(buffer, block[:n]...)
 		if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {
