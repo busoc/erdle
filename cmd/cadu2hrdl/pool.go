@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+
+	"github.com/midbel/rustine/sum"
 )
 
 type pool struct {
@@ -123,7 +125,7 @@ func writeHadock(c *conn, bs []byte) (int, error) {
 	binary.Write(&buf, binary.BigEndian, c.next)
 	binary.Write(&buf, binary.BigEndian, uint32(len(bs)))
 	buf.Write(bs)
-	binary.Write(&buf, binary.BigEndian, uint16(0xFFFF))
+	binary.Write(&buf, binary.BigEndian, sum.Sum1071Bis(buf.Bytes()))
 
 	n, err := io.Copy(c.Conn, &buf)
 	return int(n), err
