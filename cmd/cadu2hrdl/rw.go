@@ -7,9 +7,38 @@ import (
 	"io"
 	"os"
 	"sort"
-
-	"github.com/busoc/erdle"
+	"hash"
 )
+
+type MissingCaduError struct {
+	From, To uint32
+}
+
+func (e MissingCaduError) Error() string {
+	return fmt.Sprintf("%d missing cadus (%d - %d)", ((e.To-e.From)&0xFFFFFF)-1, e.From, e.To)
+}
+
+type CRCError struct {
+	Want, Got uint16
+}
+
+func (c CRCError) Error() string {
+	return fmt.Sprintf("invalid crc: want %04x, got %04x", c.Want, c.Got)
+}
+
+func IsMissingCadu(err error) bool {
+	_, ok := err.(MissingCaduError)
+	return ok
+}
+
+func IsCRCError(err error) bool {
+	_, ok := err.(CRCError)
+	return ok
+}
+
+func IsCaduError(err error) bool {
+	return IsMissingCadu(err) || IsCRCError(err)
+}
 
 type multiReader struct {
 	file  *os.File
@@ -63,6 +92,7 @@ type vcduReader struct {
 	inner   io.Reader
 	counter uint32
 	body    bool
+	digest  hash.Hash32
 }
 
 func CaduReader(r io.Reader, skip int) io.Reader {
@@ -70,6 +100,7 @@ func CaduReader(r io.Reader, skip int) io.Reader {
 		skip:  skip,
 		inner: r,
 		body:  true,
+		digest: SumVCDU(),
 	}
 }
 
@@ -77,10 +108,12 @@ func VCDUReader(r io.Reader, skip int) io.Reader {
 	return &vcduReader{
 		skip:  skip,
 		inner: r,
+		digest: SumVCDU(),
 	}
 }
 
 func (r *vcduReader) Read(bs []byte) (int, error) {
+	defer r.digest.Reset()
 	xs := make([]byte, r.skip+1024)
 	n, err := r.inner.Read(xs)
 	if err != nil {
@@ -89,10 +122,17 @@ func (r *vcduReader) Read(bs []byte) (int, error) {
 	if n == 0 {
 		return r.Read(bs)
 	}
+	if s := r.digest.Sum(xs[r.skip+4:r.skip+1022]); !bytes.Equal(s[2:], xs[r.skip+1022:r.skip+1024]) {
+		w := binary.BigEndian.Uint16(xs[r.skip+1022:])
+		g := binary.BigEndian.Uint16(s[2:])
+		err = CRCError{Want: w, Got: g}
+	}
 
 	curr := binary.BigEndian.Uint32(xs[r.skip+6:]) >> 8
 	if diff := (curr - r.counter) & 0xFFFFFF; diff != curr && diff > 1 {
-		err = erdle.MissingCaduError{From: r.counter, To: curr}
+		if err == nil {
+			err = MissingCaduError{From: r.counter, To: curr}
+		}
 	}
 	r.counter = curr
 	if r.body {
@@ -147,7 +187,7 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 	for {
 		n, err := r.Read(block)
 		if err != nil {
-			if !erdle.IsMissingCadu(err) {
+			if !IsMissingCadu(err) {
 				return nil, nil, err
 			}
 			return nil, nil, ErrSkip
@@ -168,7 +208,7 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 	for {
 		n, err := r.Read(block)
 		if err != nil {
-			if !erdle.IsMissingCadu(err) {
+			if !IsMissingCadu(err) {
 				return nil, nil, err
 			} else {
 				return nil, nil, ErrSkip
