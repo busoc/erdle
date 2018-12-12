@@ -187,7 +187,7 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 	for {
 		n, err := r.Read(block)
 		if err != nil {
-			if !IsMissingCadu(err) {
+			if !IsCaduError(err) {
 				return nil, nil, err
 			}
 			return nil, nil, ErrSkip
@@ -208,7 +208,7 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 	for {
 		n, err := r.Read(block)
 		if err != nil {
-			if !IsMissingCadu(err) {
+			if !IsCaduError(err) {
 				return nil, nil, err
 			} else {
 				return nil, nil, ErrSkip
