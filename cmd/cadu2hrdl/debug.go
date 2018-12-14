@@ -15,12 +15,7 @@ import (
 	"github.com/midbel/ringbuffer"
 )
 
-func replayCadus(addr string, files []string, rate, skip int) error {
-	m, err := MultiReader(files)
-	if err != nil {
-		return err
-	}
-
+func replayCadus(addr string, r io.Reader, rate int) error {
 	c, err := net.Dial(protoFromAddr(addr))
 	if err != nil {
 		return err
@@ -39,7 +34,6 @@ func replayCadus(addr string, files []string, rate, skip int) error {
 
 	var size, count int
 
-	r := VCDUReader(m, skip)
 	for {
 		if n, err := io.CopyN(w, r, 1024); err != nil {
 			if err == io.EOF {

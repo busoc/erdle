@@ -30,7 +30,7 @@ func (c *coze) Update(z *coze) {
 	c.Missing += z.Missing
 }
 
-func countHRDL(files []string, by string, skip int) error {
+func countHRDL(r io.Reader, by string) error {
 	var byFunc func(bs []byte) (byte, uint32)
 	switch by {
 	case "origin":
@@ -44,21 +44,19 @@ func countHRDL(files []string, by string, skip int) error {
 	default:
 		return fmt.Errorf("unrecognized value %s", by)
 	}
-	m, err := MultiReader(files)
-	if err != nil {
-		return err
-	}
 
 	zs := make(map[byte]*coze)
 	ps := make(map[byte]uint32)
 
-	r := HRDLReader(m, skip)
 	body := make([]byte, 8<<20)
 	for i := 1; ; i++ {
 		_, err := r.Read(body)
 		if err != nil {
 			if err == io.EOF {
 				break
+			}
+			if _, ok := IsMissingCadu(err); ok {
+				continue
 			}
 			return err
 		}
@@ -79,28 +77,31 @@ func countHRDL(files []string, by string, skip int) error {
 	return nil
 }
 
-func listHRDL(files []string, skip int, raw bool) error {
-	m, err := MultiReader(files)
-	if err != nil {
-		return err
-	}
-
-	r := HRDLReader(m, skip)
+func listHRDL(r io.Reader, raw bool) error {
 	body := make([]byte, 8<<20)
+	var total, size, errCRC, errMissing int
 	for i := 1; ; i++ {
-		_, err := r.Read(body)
-		if err != nil {
-			if err == io.EOF {
-				break
+		if n, err := r.Read(body); err == nil {
+      total++
+      size += n
+			if raw {
+				log.Printf("%6d | %x | %x | %x", i, body[:8], body[8:24], body[24:48])
+			} else {
+				dumpErdle(i, bytes.NewReader(body[:n]))
 			}
-			return err
-		}
-		if raw {
-			log.Printf("%6d | %x | %x | %x", i, body[:8], body[8:24], body[24:48])
-		} else {
-			dumpErdle(i, bytes.NewReader(body))
-		}
+    } else if err == io.EOF {
+      break
+    } else if n, ok := IsMissingCadu(err); ok {
+      size += n
+      errMissing += n
+    } else if IsCRCError(err) {
+      size += n
+      errCRC++
+    } else {
+      break
+    }
 	}
+  log.Printf("%d HRDL packets (%d KB, %d missing cadus, %d corrupted)", total, size>>10, errMissing, errCRC)
 	return nil
 }
 

@@ -61,15 +61,51 @@ func main() {
 		for i := 1; i < flag.NArg(); i++ {
 			files[i-1] = flag.Arg(i)
 		}
-		if err := replayCadus(flag.Arg(0), files, *q, *c); err != nil {
+		r, err := MultiReader(files)
+		if err != nil {
 			log.Fatalln(err)
 		}
-	case "count":
-		if err := countHRDL(flag.Args(), *b, *c); err != nil {
+		if err := replayCadus(flag.Arg(0), VCDUReader(r, *c), *q); err != nil {
+			log.Fatalln(err)
+		}
+	case "replay+pcap":
+		r, err := PCAPReader(flag.Arg(1), *x)
+		if err != nil {
+			log.Println(err)
+		}
+		if err := replayCadus(flag.Arg(0), VCDUReader(r, 0), *q); err != nil {
 			log.Fatalln(err)
 		}
 	case "list":
-		if err := listHRDL(flag.Args(), *c, *k); err != nil {
+		r, err := MultiReader(flag.Args())
+		if err != nil {
+			log.Fatalln(err)
+		}
+		if err := listHRDL(HRDLReader(r, *c), *k); err != nil {
+			log.Fatalln(err)
+		}
+	case "list+pcap":
+		r, err := PCAPReader(flag.Arg(0), *x)
+	  if err != nil {
+	    log.Fatalln(err)
+	  }
+		if err := listHRDL(HRDLReader(r, 0), *k); err != nil {
+			log.Fatalln(err)
+		}
+	case "count":
+		r, err := MultiReader(flag.Args())
+		if err != nil {
+			log.Fatalln(err)
+		}
+		if err := countHRDL(HRDLReader(r, *c), *b); err != nil {
+			log.Fatalln(err)
+		}
+	case "count+pcap":
+		r, err := PCAPReader(flag.Arg(0), *x)
+	  if err != nil {
+	    log.Fatalln(err)
+	  }
+		if err := countHRDL(HRDLReader(r, 0), *b); err != nil {
 			log.Fatalln(err)
 		}
 	case "debug":
