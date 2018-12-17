@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -235,7 +236,7 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 				}
 			}
 			select {
-			case q <- bs[8:]:
+			case q <- bytes.Replace(bs[8:], Stuff, Word, -1)://bs[8:]:
 				atomic.AddInt64(&count, 1)
 			default:
 				atomic.AddInt64(&dropped, 1)
