@@ -21,6 +21,7 @@ const deltaGPS = time.Duration(315964800) * time.Second
 type coze struct {
 	Count   int
 	Size    int
+	Invalid int
 	Missing uint32
 }
 
@@ -28,6 +29,32 @@ func (c *coze) Update(z *coze) {
 	c.Count += z.Count
 	c.Size += z.Size
 	c.Missing += z.Missing
+}
+
+func countCadus(r io.Reader) error {
+	body := make([]byte, 1024)
+	var z coze
+	for {
+		n, err := r.Read(body)
+		if err == io.EOF {
+			break
+		}
+		if n, ok := IsMissingCadu(err); ok {
+			z.Missing += uint32(n)
+			continue
+		}
+		if IsCRCError(err) {
+			z.Invalid++
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		z.Count++
+		z.Size += n
+	}
+	log.Printf("%d cadus, missing: %d, invalid: %d (%dKB)", z.Count, z.Missing, z.Invalid, z.Size>>10)
+	return nil
 }
 
 func countHRDL(r io.Reader, by string) error {
@@ -82,26 +109,26 @@ func listHRDL(r io.Reader, raw bool) error {
 	var total, size, errCRC, errMissing int
 	for i := 1; ; i++ {
 		if n, err := r.Read(body); err == nil {
-      total++
-      size += n
+			total++
+			size += n
 			if raw {
 				log.Printf("%6d | %x | %x | %x", i, body[:8], body[8:24], body[24:48])
 			} else {
 				dumpErdle(i, bytes.NewReader(body[:n]))
 			}
-    } else if err == io.EOF {
-      break
-    } else if n, ok := IsMissingCadu(err); ok {
-      size += n
-      errMissing += n
-    } else if IsCRCError(err) {
-      size += n
-      errCRC++
-    } else {
-      break
-    }
+		} else if err == io.EOF {
+			break
+		} else if n, ok := IsMissingCadu(err); ok {
+			size += n
+			errMissing += n
+		} else if IsCRCError(err) {
+			size += n
+			errCRC++
+		} else {
+			break
+		}
 	}
-  log.Printf("%d HRDL packets (%d KB, %d missing cadus, %d corrupted)", total, size>>10, errMissing, errCRC)
+	log.Printf("%d HRDL packets (%d KB, %d missing cadus, %d corrupted)", total, size>>10, errMissing, errCRC)
 	return nil
 }
 

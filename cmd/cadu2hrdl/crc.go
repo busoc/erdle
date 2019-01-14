@@ -1,8 +1,8 @@
 package main
 
 import (
-  "encoding/binary"
-  "hash"
+	"encoding/binary"
+	"hash"
 )
 
 const (
@@ -15,9 +15,9 @@ type vcduSum struct {
 }
 
 func Sum(bs []byte) uint16 {
-  s := SumVCDU()
-  s.Write(bs)
-  return uint16(s.Sum32())
+	s := SumVCDU()
+	s.Write(bs)
+	return uint16(s.Sum32())
 }
 
 func SumVCDU() hash.Hash32 {

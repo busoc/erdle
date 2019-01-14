@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"sort"
-	"hash"
 )
 
 type MissingCaduError struct {
@@ -28,7 +28,7 @@ func (c CRCError) Error() string {
 
 func IsMissingCadu(err error) (int, bool) {
 	e, ok := err.(MissingCaduError)
-	return int((e.To-e.From)&0xFFFFFF), ok
+	return int((e.To - e.From) & 0xFFFFFF), ok
 }
 
 func IsCRCError(err error) bool {
@@ -98,17 +98,17 @@ type vcduReader struct {
 
 func CaduReader(r io.Reader, skip int) io.Reader {
 	return &vcduReader{
-		skip:  skip,
-		inner: r,
-		body:  true,
+		skip:   skip,
+		inner:  r,
+		body:   true,
 		digest: SumVCDU(),
 	}
 }
 
 func VCDUReader(r io.Reader, skip int) io.Reader {
 	return &vcduReader{
-		skip:  skip,
-		inner: r,
+		skip:   skip,
+		inner:  r,
 		digest: SumVCDU(),
 	}
 }
@@ -123,7 +123,7 @@ func (r *vcduReader) Read(bs []byte) (int, error) {
 	if n == 0 {
 		return r.Read(bs)
 	}
-	if s := r.digest.Sum(xs[r.skip+4:r.skip+1022]); !bytes.Equal(s[2:], xs[r.skip+1022:r.skip+1024]) {
+	if s := r.digest.Sum(xs[r.skip+4 : r.skip+1022]); !bytes.Equal(s[2:], xs[r.skip+1022:r.skip+1024]) {
 		w := binary.BigEndian.Uint16(xs[r.skip+1022:])
 		g := binary.BigEndian.Uint16(s[2:])
 		err = CRCError{Want: w, Got: g}

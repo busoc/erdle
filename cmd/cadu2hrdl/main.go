@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -85,25 +86,29 @@ func main() {
 		}
 		switch *t {
 		case "", "hrdl":
+			err = listHRDL(HRDLReader(r, *c), *k)
 		case "cadu":
+			err = fmt.Errorf("not yet implemented")
 		default:
 			log.Fatalln("unknown packet type %s", *t)
 		}
-		if err := listHRDL(HRDLReader(r, *c), *k); err != nil {
+		if err != nil {
 			log.Fatalln(err)
 		}
 	case "list+pcap":
 		r, err := PCAPReader(flag.Arg(0), *x)
-	  if err != nil {
-	    log.Fatalln(err)
-	  }
+		if err != nil {
+			log.Fatalln(err)
+		}
 		switch *t {
 		case "", "hrdl":
+			err = listHRDL(HRDLReader(r, 0), *k)
 		case "cadu":
+			err = fmt.Errorf("not yet implemented")
 		default:
 			log.Fatalln("unknown packet type %s", *t)
 		}
-		if err := listHRDL(HRDLReader(r, 0), *k); err != nil {
+		if err != nil {
 			log.Fatalln(err)
 		}
 	case "count":
@@ -113,25 +118,29 @@ func main() {
 		}
 		switch *t {
 		case "", "hrdl":
+			err = countHRDL(HRDLReader(r, *c), *b)
 		case "cadu":
+			err = countCadus(VCDUReader(r, 0))
 		default:
 			log.Fatalln("unknown packet type %s", *t)
 		}
-		if err := countHRDL(HRDLReader(r, *c), *b); err != nil {
+		if err != nil {
 			log.Fatalln(err)
 		}
 	case "count+pcap":
 		r, err := PCAPReader(flag.Arg(0), *x)
-	  if err != nil {
-	    log.Fatalln(err)
-	  }
+		if err != nil {
+			log.Fatalln(err)
+		}
 		switch *t {
 		case "", "hrdl":
+			err = countHRDL(HRDLReader(r, 0), *b)
 		case "cadu":
+			err = countCadus(VCDUReader(r, 0))
 		default:
 			log.Fatalln("unknown packet type %s", *t)
 		}
-		if err := countHRDL(HRDLReader(r, 0), *b); err != nil {
+		if err != nil {
 			log.Fatalln(err)
 		}
 	case "debug":
@@ -261,7 +270,7 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 				}
 			}
 			select {
-			case q <- bytes.Replace(bs[8:], Stuff, Word, -1)://bs[8:]:
+			case q <- bytes.Replace(bs[8:], Stuff, Word, -1): //bs[8:]:
 				atomic.AddInt64(&count, 1)
 			default:
 				atomic.AddInt64(&dropped, 1)
@@ -324,7 +333,7 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 			c.Close()
 			close(q)
 		}()
-		var buffer, rest  []byte
+		var buffer, rest []byte
 		r := CaduReader(r, 0)
 		for {
 			buffer, rest, err = nextPacket(r, rest)
