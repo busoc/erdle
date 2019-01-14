@@ -57,6 +57,42 @@ func countCadus(r io.Reader) error {
 	return nil
 }
 
+func listCadus(r io.Reader) error {
+	body := make([]byte, 1024)
+	for i := 0; ; i++ {
+		_, err := r.Read(body)
+		if err == io.EOF {
+			break
+		}
+		var missing int
+		if m, ok := IsMissingCadu(err); err != nil && !(ok || IsCRCError(err)) {
+			log.Println(err)
+			return err
+		} else {
+			missing = m
+		}
+		var (
+			magic uint32
+			seq   uint32
+			pid   uint16
+			valid string
+		)
+		rs := bytes.NewReader(body)
+		binary.Read(rs, binary.BigEndian, &magic)
+		binary.Read(rs, binary.BigEndian, &pid)
+		binary.Read(rs, binary.BigEndian, &seq)
+
+		if err != nil {
+			valid = err.Error()
+		} else {
+			valid = "-"
+		}
+
+		log.Printf("%5d | %x | %1d | %12d | %12d | %s", i, magic, pid&0x003F, seq>>8, missing, valid)
+	}
+	return nil
+}
+
 func countHRDL(r io.Reader, by string) error {
 	var byFunc func(bs []byte) (byte, uint32)
 	switch by {

@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"flag"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -88,7 +87,7 @@ func main() {
 		case "", "hrdl":
 			err = listHRDL(HRDLReader(r, *c), *k)
 		case "cadu":
-			err = fmt.Errorf("not yet implemented")
+			err = listCadus(VCDUReader(r, 0))
 		default:
 			log.Fatalln("unknown packet type %s", *t)
 		}
@@ -104,7 +103,7 @@ func main() {
 		case "", "hrdl":
 			err = listHRDL(HRDLReader(r, 0), *k)
 		case "cadu":
-			err = fmt.Errorf("not yet implemented")
+			err = listCadus(VCDUReader(r, 0))
 		default:
 			log.Fatalln("unknown packet type %s", *t)
 		}
