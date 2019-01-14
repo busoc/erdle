@@ -48,6 +48,7 @@ func main() {
 
 	m := flag.String("m", "", "mode")
 	b := flag.String("b", "", "by")
+	t := flag.String("t", "", "packet type")
 	q := flag.Int("q", 64, "queue size before dropping HRDL packets")
 	c := flag.Int("c", 8, "number of connections to remote server")
 	i := flag.Int("i", -1, "hadock instance used")
@@ -82,6 +83,12 @@ func main() {
 		if err != nil {
 			log.Fatalln(err)
 		}
+		switch *t {
+		case "", "hrdl":
+		case "cadu":
+		default:
+			log.Fatalln("unknown packet type %s", *t)
+		}
 		if err := listHRDL(HRDLReader(r, *c), *k); err != nil {
 			log.Fatalln(err)
 		}
@@ -90,6 +97,12 @@ func main() {
 	  if err != nil {
 	    log.Fatalln(err)
 	  }
+		switch *t {
+		case "", "hrdl":
+		case "cadu":
+		default:
+			log.Fatalln("unknown packet type %s", *t)
+		}
 		if err := listHRDL(HRDLReader(r, 0), *k); err != nil {
 			log.Fatalln(err)
 		}
@@ -97,6 +110,12 @@ func main() {
 		r, err := MultiReader(flag.Args())
 		if err != nil {
 			log.Fatalln(err)
+		}
+		switch *t {
+		case "", "hrdl":
+		case "cadu":
+		default:
+			log.Fatalln("unknown packet type %s", *t)
 		}
 		if err := countHRDL(HRDLReader(r, *c), *b); err != nil {
 			log.Fatalln(err)
@@ -106,6 +125,12 @@ func main() {
 	  if err != nil {
 	    log.Fatalln(err)
 	  }
+		switch *t {
+		case "", "hrdl":
+		case "cadu":
+		default:
+			log.Fatalln("unknown packet type %s", *t)
+		}
 		if err := countHRDL(HRDLReader(r, 0), *b); err != nil {
 			log.Fatalln(err)
 		}
