@@ -47,36 +47,36 @@ func protoFromAddr(a string) (string, string) {
 var commands = []*cli.Command{
 	{
 		Usage: "list [-pcap] [-x filter] [-t type] [-c skip] [-k keep] <file...>",
-		Short: "list cadus/HRDL packets contained in a file",
+		Short: "list cadus/HRDL packets contained in the given files",
 		Run:   runList,
 	},
 	{
 		Usage: "count [-pcap] [-x filter] [-t type] [-b by] [-c skip] <file...>",
-		Short: "count cadus/HRDL packets contained in a file",
+		Short: "count cadus/HRDL packets contained in the given files",
 		Run:   runCount,
 	},
 	{
-		Usage: "replay [-pcap] [-x filter] [-c skip] [-q queue] <remote> <file...>",
+		Usage: "replay [-pcap] [-x filter] [-c skip] [-q queue] <host:port> <file...>",
 		Short: "send cadus from a file to a remote host",
 		Run:   runReplay,
 	},
 	{
-		Usage: "store [-k keep] [-q queue] <local> <datadir>",
+		Usage: "store [-k keep] [-q queue] <host:port> <datadir>",
 		Short: "create an archive of HRDL packets from a cadus stream",
 		Run:   runStore,
 	},
 	{
-		Usage: "relay [-q queue] [-i instance] [-c conn] [-i instance] [-k keep] [-x proxy] <local> <remote>",
+		Usage: "relay [-q queue] [-i instance] [-c conn] [-i instance] [-k keep] [-x proxy] <host:port> <host:port>",
 		Short: "reassemble incoming cadus to HRDL packets",
 		Run:   runRelay,
 	},
 	{
-		Usage: "dump [-q queue] [-i instance] [-k keep] <local>",
+		Usage: "dump [-q queue] [-i instance] [-k keep] <host:port>",
 		Short: "print the raw bytes on incoming HRDL packets",
 		Run:   runDump,
 	},
 	{
-		Usage: "debug [-q queue] [-i instance] <local>",
+		Usage: "debug [-q queue] [-i instance] <host:port>",
 		Short: "print the raw bytes on incoming HRDL packets",
 		Run:   runDebug,
 	},
@@ -87,13 +87,22 @@ var commands = []*cli.Command{
 	},
 }
 
-const (
-	BuildTime = "2019-01-15 11:30:00"
-	Program   = "c2h"
-	Version   = "0.0.1"
-)
+const Program   = "c2h"
 
-const helpText = `{{.Name}}
+func init() {
+	cli.BuildTime = "2019-01-15 11:30:00"
+	cli.Version   = "0.0.1"
+}
+
+const helpText = `
+{{.Name}} handles cadus from various sources (files, pcap files, network
+connection(s)) to produce:
+
+* stream of HRDL packets by reassembling them
+* reports on the status of a stream
+
+{{.Name}} can also be used to debug in realtime (or via a replay) a stream
+of cadus and/or reassembled HRDL packets.
 
 Usage:
 
@@ -116,7 +125,7 @@ func main() {
 			Name:     Program,
 			Commands: commands,
 		}
-		t := template.Must(template.New("help").Parse(helpText))
+		t := template.Must(template.New("help").Parse(strings.TrimSpace(helpText)+"\n"))
 		t.Execute(os.Stderr, data)
 
 		os.Exit(2)
