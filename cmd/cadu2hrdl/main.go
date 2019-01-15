@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -12,8 +12,10 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"text/template"
 	"time"
 
+	"github.com/midbel/cli"
 	"github.com/midbel/ringbuffer"
 	"golang.org/x/sync/errgroup"
 )
@@ -42,179 +44,280 @@ func protoFromAddr(a string) (string, string) {
 	return strings.ToLower(u.Scheme), u.Host
 }
 
+var commands = []*cli.Command{
+	{
+		Usage: "list [-pcap] [-x filter] [-t type] [-c skip] [-k keep] <file...>",
+		Short: "list cadus/HRDL packets contained in a file",
+		Run:   runList,
+	},
+	{
+		Usage: "count [-pcap] [-x filter] [-t type] [-b by] [-c skip] <file...>",
+		Short: "count cadus/HRDL packets contained in a file",
+		Run:   runCount,
+	},
+	{
+		Usage: "replay [-pcap] [-x filter] [-c skip] [-q queue] <remote> <file...>",
+		Short: "send cadus from a file to a remote host",
+		Run:   runReplay,
+	},
+	{
+		Usage: "store [-k keep] [-q queue] <local> <datadir>",
+		Short: "create an archive of HRDL packets from a cadus stream",
+		Run:   runStore,
+	},
+	{
+		Usage: "relay [-q queue] [-i instance] [-c conn] [-i instance] [-k keep] [-x proxy] <local> <remote>",
+		Short: "reassemble incoming cadus to HRDL packets",
+		Run:   runRelay,
+	},
+	{
+		Usage: "dump [-q queue] [-i instance] [-k keep] <local>",
+		Short: "print the raw bytes on incoming HRDL packets",
+		Run:   runDump,
+	},
+	{
+		Usage: "debug [-q queue] [-i instance] <local>",
+		Short: "print the raw bytes on incoming HRDL packets",
+		Run:   runDebug,
+	},
+	{
+		Usage: "trace <local>",
+		Short: "give statistics on incoming cadus stream",
+		Run:   runTrace,
+	},
+}
+
+const (
+	BuildTime = "2019-01-15 11:30:00"
+	Program   = "c2h"
+	Version   = "0.0.1"
+)
+
+const helpText = `{{.Name}}
+
+Usage:
+
+  {{.Name}} command [arguments]
+
+The commands are:
+
+{{range .Commands}}{{printf "  %-9s %s" .String .Short}}
+{{end}}
+Use {{.Name}} [command] -h for more information about its usage.
+`
+
 func main() {
 	log.SetFlags(0)
-	log.SetOutput(os.Stdout)
+	usage := func() {
+		data := struct {
+			Name     string
+			Commands []*cli.Command
+		}{
+			Name:     Program,
+			Commands: commands,
+		}
+		t := template.Must(template.New("help").Parse(helpText))
+		t.Execute(os.Stderr, data)
 
-	m := flag.String("m", "", "mode")
-	b := flag.String("b", "", "by")
-	t := flag.String("t", "", "packet type")
-	q := flag.Int("q", 64, "queue size before dropping HRDL packets")
-	c := flag.Int("c", 8, "number of connections to remote server")
-	i := flag.Int("i", -1, "hadock instance used")
-	k := flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
-	x := flag.String("x", "", "proxy incoming cadus to a remote address")
-	flag.Parse()
-	switch *m {
+		os.Exit(2)
+	}
+	if err := cli.Run(commands, usage, nil); err != nil {
+		log.Fatalln(err)
+	}
+}
+
+func runRelay(cmd *cli.Command, args []string) error {
+	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
+	c := cmd.Flag.Int("c", 8, "number of connections to remote server")
+	i := cmd.Flag.Int("i", -1, "hadock instance used")
+	k := cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
+	x := cmd.Flag.String("x", "", "proxy incoming cadus to a remote address")
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	p, err := NewPool(cmd.Flag.Arg(1), *c, *i)
+	if err != nil {
+		return err
+	}
+	queue, err := reassemble(cmd.Flag.Arg(0), *x, *q)
+	if err != nil {
+		return err
+	}
+
+	var gp errgroup.Group
+	for bs := range validate(queue, *q, *k) {
+		xs := bs
+		gp.Go(func() error {
+			_, err := p.Write(xs)
+			return err
+		})
+	}
+	return gp.Wait()
+}
+
+func runReplay(cmd *cli.Command, args []string) error {
+	pcap := cmd.Flag.Bool("pcap", false, "")
+	x := cmd.Flag.String("x", "", "pcap filter")
+	c := cmd.Flag.Int("c", 0, "bytes to skip before each packets")
+	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	var (
+		r   io.Reader
+		err error
+	)
+	if *pcap {
+		r, err = PCAPReader(cmd.Flag.Arg(1), *x)
+		*c = 0
+	} else {
+		files := make([]string, cmd.Flag.NArg()-1)
+		for i := 1; i < cmd.Flag.NArg(); i++ {
+			files[i-1] = cmd.Flag.Arg(i)
+		}
+		r, err = MultiReader(files)
+	}
+	if err != nil {
+		return err
+	}
+	return replayCadus(cmd.Flag.Arg(0), VCDUReader(r, *c), *q)
+}
+
+func runCount(cmd *cli.Command, args []string) error {
+	pcap := cmd.Flag.Bool("pcap", false, "")
+	b := cmd.Flag.String("b", "", "by")
+	x := cmd.Flag.String("x", "", "pcap filter")
+	t := cmd.Flag.String("t", "", "packet type")
+	c := cmd.Flag.Int("c", 0, "bytes to skip before each packets")
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	var (
+		r   io.Reader
+		err error
+	)
+	if *pcap {
+		r, err = PCAPReader(cmd.Flag.Arg(0), *x)
+		*c = 0
+	} else {
+		r, err = MultiReader(cmd.Flag.Args())
+	}
+	if err != nil {
+		return err
+	}
+	switch strings.ToLower(*t) {
+	case "", "hrdl":
+		return countHRDL(HRDLReader(r, *c), *b)
+	case "cadu":
+		return countCadus(VCDUReader(r, *c))
 	default:
-		log.Fatalf("unsupported mode %s", *m)
-	case "replay":
-		files := make([]string, flag.NArg()-1)
-		for i := 1; i < flag.NArg(); i++ {
-			files[i-1] = flag.Arg(i)
-		}
-		r, err := MultiReader(files)
-		if err != nil {
-			log.Fatalln(err)
-		}
-		if err := replayCadus(flag.Arg(0), VCDUReader(r, *c), *q); err != nil {
-			log.Fatalln(err)
-		}
-	case "replay+pcap":
-		r, err := PCAPReader(flag.Arg(1), *x)
-		if err != nil {
-			log.Println(err)
-		}
-		if err := replayCadus(flag.Arg(0), VCDUReader(r, 0), *q); err != nil {
-			log.Fatalln(err)
-		}
-	case "list":
-		r, err := MultiReader(flag.Args())
-		if err != nil {
-			log.Fatalln(err)
-		}
-		switch *t {
-		case "", "hrdl":
-			err = listHRDL(HRDLReader(r, *c), *k)
-		case "cadu":
-			err = listCadus(VCDUReader(r, 0))
-		default:
-			log.Fatalln("unknown packet type %s", *t)
-		}
-		if err != nil {
-			log.Fatalln(err)
-		}
-	case "list+pcap":
-		r, err := PCAPReader(flag.Arg(0), *x)
-		if err != nil {
-			log.Fatalln(err)
-		}
-		switch *t {
-		case "", "hrdl":
-			err = listHRDL(HRDLReader(r, 0), *k)
-		case "cadu":
-			err = listCadus(VCDUReader(r, 0))
-		default:
-			log.Fatalln("unknown packet type %s", *t)
-		}
-		if err != nil {
-			log.Fatalln(err)
-		}
-	case "count":
-		r, err := MultiReader(flag.Args())
-		if err != nil {
-			log.Fatalln(err)
-		}
-		switch *t {
-		case "", "hrdl":
-			err = countHRDL(HRDLReader(r, *c), *b)
-		case "cadu":
-			err = countCadus(VCDUReader(r, 0))
-		default:
-			log.Fatalln("unknown packet type %s", *t)
-		}
-		if err != nil {
-			log.Fatalln(err)
-		}
-	case "count+pcap":
-		r, err := PCAPReader(flag.Arg(0), *x)
-		if err != nil {
-			log.Fatalln(err)
-		}
-		switch *t {
-		case "", "hrdl":
-			err = countHRDL(HRDLReader(r, 0), *b)
-		case "cadu":
-			err = countCadus(VCDUReader(r, 0))
-		default:
-			log.Fatalln("unknown packet type %s", *t)
-		}
-		if err != nil {
-			log.Fatalln(err)
-		}
-	case "debug":
-		if err := traceCadus(flag.Arg(0)); err != nil {
-			log.Fatalln(err)
-		}
-	case "hrdp":
-		hr, err := NewHRDP(flag.Arg(1))
-		if err != nil {
-			log.Fatalln(err)
-		}
-		queue, err := reassemble(flag.Arg(0), "", *q)
-		if err != nil {
-			log.Fatalln(err)
-		}
-		tick := time.Tick(time.Second)
-		var (
-			count int
-			size  int
-			fail  int
-		)
-		logger := log.New(os.Stderr, "[hrdp] ", 0)
-		for bs := range validate(queue, *q, *k) {
-			if n, err := hr.Write(bs); err != nil {
-				fail++
-				log.Println(err)
-			} else {
-				count++
-				size += n
-			}
-			select {
-			case <-tick:
-				logger.Printf("%6d packets (%s), %7dKB, %6d failures", count, hr.Filename(), size>>10, fail)
-				count, size, fail = 0, 0, 0
-			default:
-			}
-		}
-	case "hrdl", "hadock":
-		queue, err := debugHRDL(flag.Arg(0), *q, *i)
-		if err != nil {
-			log.Fatalln(err)
-		}
-		if err := dumpPackets(queue, *i); err != nil {
-			log.Fatalln(err)
-		}
-	case "cadu", "vcdu":
-		queue, err := reassemble(flag.Arg(0), "", *q)
-		if err != nil {
-			log.Fatalln(err)
-		}
-		if err := dumpPackets(validate(queue, *q, *k), *i); err != nil {
-			log.Fatalln(err)
-		}
-	case "", "relay":
-		p, err := NewPool(flag.Arg(1), *c, *i)
-		if err != nil {
-			log.Fatalln(err)
-		}
-		queue, err := reassemble(flag.Arg(0), *x, *q)
-		if err != nil {
-			log.Fatalln(err)
-		}
+		return fmt.Errorf("unknown packet type %s", *t)
+	}
+}
 
-		var gp errgroup.Group
-		for bs := range validate(queue, *q, *k) {
-			xs := bs
-			gp.Go(func() error {
-				_, err := p.Write(xs)
-				return err
-			})
+func runList(cmd *cli.Command, args []string) error {
+	pcap := cmd.Flag.Bool("pcap", false, "")
+	x := cmd.Flag.String("x", "", "pcap filter")
+	t := cmd.Flag.String("t", "", "packet type")
+	k := cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
+	c := cmd.Flag.Int("c", 0, "bytes to skip before each packets")
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	var (
+		r   io.Reader
+		err error
+	)
+	if *pcap {
+		r, err = PCAPReader(cmd.Flag.Arg(0), *x)
+		*c = 0
+	} else {
+		r, err = MultiReader(cmd.Flag.Args())
+	}
+	if err != nil {
+		return err
+	}
+	switch strings.ToLower(*t) {
+	case "", "hrdl":
+		return listHRDL(HRDLReader(r, *c), *k)
+	case "cadu", "vcdu":
+		return listCadus(VCDUReader(r, *c))
+	default:
+		return fmt.Errorf("unknown packet type %s", *t)
+	}
+}
+
+func runStore(cmd *cli.Command, args []string) error {
+	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
+	k := cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	hr, err := NewHRDP(cmd.Flag.Arg(1))
+	if err != nil {
+		return err
+	}
+	queue, err := reassemble(cmd.Flag.Arg(0), "", *q)
+	if err != nil {
+		return err
+	}
+	tick := time.Tick(time.Second)
+	var (
+		count int
+		size  int
+		fail  int
+	)
+	logger := log.New(os.Stderr, "[hrdp] ", 0)
+	for bs := range validate(queue, *q, *k) {
+		if n, err := hr.Write(bs); err != nil {
+			fail++
+			log.Println(err)
+		} else {
+			count++
+			size += n
 		}
-		if err := gp.Wait(); err != nil {
-			log.Fatalln(err)
+		select {
+		case <-tick:
+			logger.Printf("%6d packets (%s), %7dKB, %6d failures", count, hr.Filename(), size>>10, fail)
+			count, size, fail = 0, 0, 0
+		default:
 		}
 	}
+	return nil
+}
+
+func runDump(cmd *cli.Command, args []string) error {
+	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
+	i := cmd.Flag.Int("i", -1, "hadock instance used")
+	k := cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	queue, err := reassemble(cmd.Flag.Arg(0), "", *q)
+	if err != nil {
+		return err
+	}
+	return dumpPackets(validate(queue, *q, *k), *i)
+}
+
+func runDebug(cmd *cli.Command, args []string) error {
+	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
+	i := cmd.Flag.Int("i", -1, "hadock instance used")
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	queue, err := debugHRDL(cmd.Flag.Arg(0), *q, *i)
+	if err != nil {
+		return err
+	}
+	return dumpPackets(queue, *i)
+}
+
+func runTrace(cmd *cli.Command, args []string) error {
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	return traceCadus(cmd.Flag.Arg(0))
 }
 
 func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
