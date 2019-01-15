@@ -49,16 +49,43 @@ var commands = []*cli.Command{
 		Usage: "list [-pcap] [-x filter] [-t type] [-c skip] [-k keep] <file...>",
 		Short: "list cadus/HRDL packets contained in the given files",
 		Run:   runList,
+		Desc: `
+options:
+
+  -c COUNT   skip COUNT bytes between each packets
+  -x FILTER  specify a predicate to filter packets from a capture file
+  -t TYPE    specify the packet type (hrdl or cadu)
+  -k         keep invalid HRDL packets
+  -pcap      tell replay that the given files is a pcap file
+`,
 	},
 	{
 		Usage: "count [-pcap] [-x filter] [-t type] [-b by] [-c skip] <file...>",
 		Short: "count cadus/HRDL packets contained in the given files",
 		Run:   runCount,
+		Desc: `
+options:
+
+  -b BY      report count by origin or by channel if type is hrdl
+  -c COUNT   skip COUNT bytes between each packets
+  -x FILTER  specify a predicate to filter packets from a capture file
+  -t TYPE    specify the packet type (hrdl or cadu)
+  -k         keep invalid HRDL packets
+  -pcap      tell replay that the given files is a pcap file
+`,
 	},
 	{
-		Usage: "replay [-pcap] [-x filter] [-c skip] [-q queue] <host:port> <file...>",
+		Usage: "replay [-pcap] [-x filter] [-c skip] [-r rate] <host:port> <file...>",
 		Short: "send cadus from a file to a remote host",
 		Run:   runReplay,
+		Desc: `
+options:
+
+  -c    COUNT   skip COUNT bytes between each packets
+  -r    RATE    define the output bandwidth usage in bytes
+  -x    FILTER  specify a predicate to filter packets from a capture file
+  -pcap         tell replay that the given files is a pcap file
+`,
 	},
 	{
 		Usage: "store [-k keep] [-q queue] <host:port> <datadir>",
@@ -66,7 +93,7 @@ var commands = []*cli.Command{
 		Run:   runStore,
 	},
 	{
-		Usage: "relay [-q queue] [-i instance] [-c conn] [-i instance] [-k keep] [-x proxy] <host:port> <host:port>",
+		Usage: "relay [-q queue] [-i instance] [-c conn] [-k keep] [-x proxy] <host:port> <host:port>",
 		Short: "reassemble incoming cadus to HRDL packets",
 		Run:   runRelay,
 	},
@@ -81,17 +108,17 @@ var commands = []*cli.Command{
 		Run:   runDebug,
 	},
 	{
-		Usage: "trace <local>",
+		Usage: "trace <host:port>",
 		Short: "give statistics on incoming cadus stream",
 		Run:   runTrace,
 	},
 }
 
-const Program   = "c2h"
+const Program = "c2h"
 
 func init() {
 	cli.BuildTime = "2019-01-15 11:30:00"
-	cli.Version   = "0.0.1"
+	cli.Version = "0.0.1"
 }
 
 const helpText = `
@@ -125,7 +152,7 @@ func main() {
 			Name:     Program,
 			Commands: commands,
 		}
-		t := template.Must(template.New("help").Parse(strings.TrimSpace(helpText)+"\n"))
+		t := template.Must(template.New("help").Parse(strings.TrimSpace(helpText) + "\n"))
 		t.Execute(os.Stderr, data)
 
 		os.Exit(2)
@@ -166,9 +193,9 @@ func runRelay(cmd *cli.Command, args []string) error {
 
 func runReplay(cmd *cli.Command, args []string) error {
 	pcap := cmd.Flag.Bool("pcap", false, "")
-	x := cmd.Flag.String("x", "", "pcap filter")
-	c := cmd.Flag.Int("c", 0, "bytes to skip before each packets")
-	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
+	filter := cmd.Flag.String("x", "", "pcap filter")
+	count := cmd.Flag.Int("c", 0, "bytes to skip before each packets")
+	rate := cmd.Flag.Int("r", 8<<20, "output bandwith usage")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
@@ -177,8 +204,8 @@ func runReplay(cmd *cli.Command, args []string) error {
 		err error
 	)
 	if *pcap {
-		r, err = PCAPReader(cmd.Flag.Arg(1), *x)
-		*c = 0
+		r, err = PCAPReader(cmd.Flag.Arg(1), *filter)
+		*count = 0
 	} else {
 		files := make([]string, cmd.Flag.NArg()-1)
 		for i := 1; i < cmd.Flag.NArg(); i++ {
@@ -189,15 +216,15 @@ func runReplay(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return replayCadus(cmd.Flag.Arg(0), VCDUReader(r, *c), *q)
+	return replayCadus(cmd.Flag.Arg(0), VCDUReader(r, *count), *rate)
 }
 
 func runCount(cmd *cli.Command, args []string) error {
 	pcap := cmd.Flag.Bool("pcap", false, "")
-	b := cmd.Flag.String("b", "", "by")
-	x := cmd.Flag.String("x", "", "pcap filter")
-	t := cmd.Flag.String("t", "", "packet type")
-	c := cmd.Flag.Int("c", 0, "bytes to skip before each packets")
+	by := cmd.Flag.String("b", "", "by")
+	filter := cmd.Flag.String("x", "", "pcap filter")
+	kind := cmd.Flag.String("t", "", "packet type")
+	count := cmd.Flag.Int("c", 0, "bytes to skip before each packets")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
@@ -206,30 +233,30 @@ func runCount(cmd *cli.Command, args []string) error {
 		err error
 	)
 	if *pcap {
-		r, err = PCAPReader(cmd.Flag.Arg(0), *x)
-		*c = 0
+		r, err = PCAPReader(cmd.Flag.Arg(0), *filter)
+		*count = 0
 	} else {
 		r, err = MultiReader(cmd.Flag.Args())
 	}
 	if err != nil {
 		return err
 	}
-	switch strings.ToLower(*t) {
+	switch strings.ToLower(*kind) {
 	case "", "hrdl":
-		return countHRDL(HRDLReader(r, *c), *b)
+		return countHRDL(HRDLReader(r, *count), strings.ToLower(*by))
 	case "cadu":
-		return countCadus(VCDUReader(r, *c))
+		return countCadus(VCDUReader(r, *count))
 	default:
-		return fmt.Errorf("unknown packet type %s", *t)
+		return fmt.Errorf("unknown packet type %s", *kind)
 	}
 }
 
 func runList(cmd *cli.Command, args []string) error {
 	pcap := cmd.Flag.Bool("pcap", false, "")
-	x := cmd.Flag.String("x", "", "pcap filter")
-	t := cmd.Flag.String("t", "", "packet type")
-	k := cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
-	c := cmd.Flag.Int("c", 0, "bytes to skip before each packets")
+	filter := cmd.Flag.String("x", "", "pcap filter")
+	kind := cmd.Flag.String("t", "", "packet type")
+	keep := cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
+	count := cmd.Flag.Int("c", 0, "bytes to skip before each packets")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
@@ -238,21 +265,21 @@ func runList(cmd *cli.Command, args []string) error {
 		err error
 	)
 	if *pcap {
-		r, err = PCAPReader(cmd.Flag.Arg(0), *x)
-		*c = 0
+		r, err = PCAPReader(cmd.Flag.Arg(0), *filter)
+		*count = 0
 	} else {
 		r, err = MultiReader(cmd.Flag.Args())
 	}
 	if err != nil {
 		return err
 	}
-	switch strings.ToLower(*t) {
+	switch strings.ToLower(*kind) {
 	case "", "hrdl":
-		return listHRDL(HRDLReader(r, *c), *k)
+		return listHRDL(HRDLReader(r, *count), *keep)
 	case "cadu", "vcdu":
-		return listCadus(VCDUReader(r, *c))
+		return listCadus(VCDUReader(r, *count))
 	default:
-		return fmt.Errorf("unknown packet type %s", *t)
+		return fmt.Errorf("unknown packet type %s", *kind)
 	}
 }
 
