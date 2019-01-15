@@ -91,21 +91,49 @@ options:
 		Usage: "store [-k keep] [-q queue] <host:port> <datadir>",
 		Short: "create an archive of HRDL packets from a cadus stream",
 		Run:   runStore,
+		Desc: `
+options:
+
+  -q SIZE  size of the queue to store reassemble packets
+  -k       store HRDL packets even if they are corrupted
+`,
 	},
 	{
 		Usage: "relay [-q queue] [-i instance] [-c conn] [-k keep] [-x proxy] <host:port> <host:port>",
 		Short: "reassemble incoming cadus to HRDL packets",
 		Run:   runRelay,
+		Desc: `
+options:
+
+  -q SIZE      size of the queue to store reassembled HRDL packets
+	-i INSTANCE  hadock instance
+	-c CONN      number of connections to open to remote host
+	-x PROXY     host:port of a remote host
+	-k           keep invalid HRDL packets
+`,
 	},
 	{
 		Usage: "dump [-q queue] [-i instance] [-k keep] <host:port>",
 		Short: "print the raw bytes on incoming HRDL packets",
 		Run:   runDump,
+		Desc: `
+options:
+
+  -q SIZE      size of the queue to store reassembled HRDL packets
+  -i INSTANCE  hadock instance
+  -k           keep invalid HRDL packets
+`,
 	},
 	{
 		Usage: "debug [-q queue] [-i instance] <host:port>",
 		Short: "print the raw bytes on incoming HRDL packets",
 		Run:   runDebug,
+		Desc: `
+options:
+
+  -q SIZE      size of the queue to store reassembled HRDL packets
+  -i INSTANCE  hadock instance
+`,
 	},
 	{
 		Usage: "trace <host:port>",
