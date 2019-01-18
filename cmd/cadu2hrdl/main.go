@@ -99,17 +99,18 @@ options:
 `,
 	},
 	{
-		Usage: "relay [-q queue] [-i instance] [-c conn] [-k keep] [-x proxy] <host:port> <host:port>",
+		Usage: "relay [-r rate] [-q queue] [-i instance] [-c conn] [-k keep] [-x proxy] <host:port> <host:port>",
 		Short: "reassemble incoming cadus to HRDL packets",
 		Run:   runRelay,
 		Desc: `
 options:
 
   -q SIZE      size of the queue to store reassembled HRDL packets
-	-i INSTANCE  hadock instance
-	-c CONN      number of connections to open to remote host
-	-x PROXY     host:port of a remote host
-	-k           keep invalid HRDL packets
+  -i INSTANCE  hadock instance
+  -r RATE      outgoing bandwidth rate
+  -c CONN      number of connections to open to remote host
+  -x PROXY     host:port of a remote host
+  -k           keep invalid HRDL packets
 `,
 	},
 	{
@@ -194,12 +195,13 @@ func runRelay(cmd *cli.Command, args []string) error {
 	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
 	c := cmd.Flag.Int("c", 8, "number of connections to remote server")
 	i := cmd.Flag.Int("i", -1, "hadock instance used")
+	r := cmd.Flag.Int("r", 0, "bandwidth rate")
 	k := cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
 	x := cmd.Flag.String("x", "", "proxy incoming cadus to a remote address")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	p, err := NewPool(cmd.Flag.Arg(1), *c, *i)
+	p, err := NewPool(cmd.Flag.Arg(1), *c, *i, *r)
 	if err != nil {
 		return err
 	}

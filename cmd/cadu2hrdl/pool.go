@@ -7,22 +7,24 @@ import (
 	"io"
 	"net"
 
+	"github.com/juju/ratelimit"
 	"github.com/midbel/rustine/sum"
 )
 
 type pool struct {
 	addr     string
 	instance int
+	rate     int
 	queue    chan net.Conn
 }
 
-func NewPool(a string, n, i int) (*pool, error) {
+func NewPool(a string, n, i, r int) (*pool, error) {
 	if n <= 1 {
 		return nil, fmt.Errorf("number of connections too small")
 	}
 	q := make(chan net.Conn, n)
 	for j := 0; j < n; j++ {
-		c, err := client(a, i)
+		c, err := client(a, i, r)
 		if err != nil {
 			return nil, err
 		}
@@ -31,6 +33,7 @@ func NewPool(a string, n, i int) (*pool, error) {
 	p := pool{
 		addr:     a,
 		queue:    q,
+		rate:     r,
 		instance: i,
 	}
 	return &p, nil
@@ -56,7 +59,7 @@ func (p *pool) pop() (net.Conn, error) {
 	case c := <-p.queue:
 		return c, nil
 	default:
-		return client(p.addr, p.instance)
+		return client(p.addr, p.instance, p.rate)
 	}
 }
 
@@ -70,13 +73,14 @@ func (p *pool) push(c net.Conn) {
 
 type conn struct {
 	net.Conn
+	inner    io.Writer
 	next     uint16
 	preamble uint16
 
 	writePacket func(*conn, []byte) (int, error)
 }
 
-func client(a string, i int) (net.Conn, error) {
+func client(a string, i, r int) (net.Conn, error) {
 	var (
 		preamble  uint16
 		writeFunc func(*conn, []byte) (int, error)
@@ -94,8 +98,13 @@ func client(a string, i int) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	var w io.Writer = c
+	if r > 0 {
+		w = ratelimit.Writer(w, ratelimit.NewBucketWithRate(float64(r), int64(r)))
+	}
 	return &conn{
 		Conn:        c,
+		inner:       w,
 		preamble:    preamble,
 		writePacket: writeFunc,
 	}, nil
