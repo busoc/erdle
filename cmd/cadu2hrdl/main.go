@@ -440,6 +440,7 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 				}
 				if chk != sum {
 					atomic.AddInt64(&errSum, 1)
+					continue
 				}
 			}
 			select {
