@@ -23,7 +23,7 @@ type Coze struct {
 	Elapsed time.Duration
 }
 
-const line = "%d cadus, %d gaps (%s), %d missing, %dKB"
+const line = "%d cadus (expected: %d cadus), %d gaps (%s), %d missing (%.2f%%), %dKB"
 
 func (z *Coze) Update(c *Coze) {
 	z.Count += c.Count
@@ -61,7 +61,8 @@ func main() {
 			os.Exit(2)
 		}
 	}
-	fmt.Fprintf(os.Stdout, line, z.Count, z.Gaps, z.Elapsed, z.Missing, z.Size>>10)
+	ratio := float64(z.Missing)/float64(z.Count+z.Missing)
+	fmt.Fprintf(os.Stdout, line, z.Count, z.Count+z.Missing, z.Gaps, z.Elapsed, z.Missing, ratio*100, z.Size>>10)
 	fmt.Fprintln(os.Stdout)
 }
 
@@ -69,6 +70,7 @@ func listCadus(h *pcap.Handle, c *Coze, list, gap bool) error {
 	d := struct {
 		Curr uint32
 		When time.Time
+		Elapsed time.Duration
 	}{}
 
 	defer h.Close()
@@ -92,7 +94,7 @@ func listCadus(h *pcap.Handle, c *Coze, list, gap bool) error {
 		md := p.Metadata()
 		t := md.Timestamp.UTC()
 		if diff := (curr - d.Curr) & 0xFFFFFF; diff != curr && diff > 1 {
-			missing = diff - 1
+			missing = diff
 			c.Missing += int(missing)
 			c.Gaps++
 			if !d.When.IsZero() {
@@ -100,7 +102,7 @@ func listCadus(h *pcap.Handle, c *Coze, list, gap bool) error {
 			}
 		}
 		if !list && gap && missing > 0 {
-			fmt.Fprintf(os.Stdout, "%5d | %s | %s | %7d | %7d | %d\n", c.Gaps, d.When.Format(time.RFC3339), t.Format(time.RFC3339), d.Curr, curr, missing)
+			fmt.Fprintf(os.Stdout, "%5d | %12s | %s | %s | %7d | %7d | %d\n", c.Gaps, d.Elapsed, d.When.Format(time.RFC3339), t.Format(time.RFC3339), d.Curr, curr, missing)
 		}
 		if list && !gap {
 			sn, dn := p.NetworkLayer().NetworkFlow().Endpoints()
@@ -116,11 +118,13 @@ func listCadus(h *pcap.Handle, c *Coze, list, gap bool) error {
 			} else {
 				proto = "unknown"
 			}
-			var e time.Duration
-			if !d.When.IsZero() {
-				e = t.Sub(d.When)
-			}
-			fmt.Fprintf(os.Stdout, "%8d | %12s | %s | %s:%s | %s:%s | %s | %6d | %d\n", c.Count, e, t.Format(time.RFC3339), sn, sp, dn, dp, proto, len(xs), missing)
+			fmt.Fprintf(os.Stdout, "%8d | %12s | %s | %s:%s | %s:%s | %s | %6d | %d\n", c.Count, d.Elapsed, t.Format(time.RFC3339), sn, sp, dn, dp, proto, len(xs), missing)
+		}
+		if !d.When.IsZero() {
+				d.Elapsed += t.Sub(d.When)
+				if d.Elapsed < 0 {
+					d.Elapsed = 0
+				}
 		}
 		d.Curr, d.When = curr, t
 	}
