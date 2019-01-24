@@ -246,7 +246,12 @@ func runReplay(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return replayCadus(cmd.Flag.Arg(0), VCDUReader(r, *count), *rate)
+	n := time.Now()
+	z, err := replayCadus(cmd.Flag.Arg(0), VCDUReader(r, *count), *rate)
+	if err == nil {
+		log.Printf("%d packets (%dMB, %s)", z.Count, z.Size>>20, time.Since(n))
+	}
+	return err
 }
 
 func runCount(cmd *cli.Command, args []string) error {

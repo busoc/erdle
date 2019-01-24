@@ -15,10 +15,10 @@ import (
 	"github.com/midbel/ringbuffer"
 )
 
-func replayCadus(addr string, r io.Reader, rate int) error {
+func replayCadus(addr string, r io.Reader, rate int) (*coze, error) {
 	c, err := net.Dial(protoFromAddr(addr))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer c.Close()
 
@@ -32,14 +32,17 @@ func replayCadus(addr string, r io.Reader, rate int) error {
 	tick := time.Tick(time.Second)
 	logger := log.New(os.Stderr, "[replay] ", 0)
 
-	var size, count int
+	var (
+		size, count int
+		z coze
+	)
 
 	for {
 		if n, err := io.CopyN(w, r, 1024); err != nil {
 			if err == io.EOF {
 				break
 			}
-			return err
+			return nil, err
 		} else {
 			size += int(n)
 			count++
@@ -47,11 +50,15 @@ func replayCadus(addr string, r io.Reader, rate int) error {
 		select {
 		case <-tick:
 			logger.Printf("%6d packets, %dKB", count, size>>10)
+			z.Count += count
+			z.Size += size
 			size, count = 0, 0
 		default:
 		}
 	}
-	return nil
+	z.Count+=count
+	z.Size+=size
+	return &z, nil
 }
 
 func traceCadus(addr string) error {
