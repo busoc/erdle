@@ -231,7 +231,7 @@ func runInspect(cmd *cli.Command, args []string) error {
 
 	var grp errgroup.Group
 	sema := make(chan struct{}, *parallel)
-	for {
+	for i := 1; ; i++ {
 		sema <- struct{}{}
 
 		var b bytes.Buffer
@@ -241,8 +241,9 @@ func runInspect(cmd *cli.Command, args []string) error {
 			}
 			return err
 		}
+		j := i
 		grp.Go(func() error {
-			err := inspectCadus(&b, *count)
+			err := inspectCadus(&b, j, *count)
 			<-sema
 			return err
 		})
