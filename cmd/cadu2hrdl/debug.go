@@ -16,7 +16,7 @@ import (
 	"github.com/midbel/ringbuffer"
 )
 
-func inspectCadus(rs io.Reader, id, skip int) error {
+func inspectCadus(rs io.Reader, skip int) error {
 	var (
 		size    uint64
 		average uint64
@@ -77,11 +77,11 @@ func inspectCadus(rs io.Reader, id, skip int) error {
 			return err
 		}
 	}
-	const row = "%5d: %7d cadus (%3dKB), %8d missing, %4d invalid, %4d filler, %7d packets (avg: %4dKB, sum: %6dKB)"
+	const row = "%7d cadus (%3dKB), %8d missing, %4d invalid, %4d filler, %7d packets (avg: %4dKB, sum: %6dKB)"
 	if hrdl == 0 {
 		hrdl = 1
 	}
-	log.Printf(row, id, total, size>>10, missing, invalid, filler, hrdl, (average/hrdl)>>10, average>>10)
+	log.Printf(row, total, size>>10, missing, invalid, filler, hrdl, (average/hrdl)>>10, average>>10)
 	return nil
 }
 

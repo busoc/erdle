@@ -219,11 +219,7 @@ func runInspect(cmd *cli.Command, args []string) error {
 	if *parallel <= 0 || *parallel >= 64 {
 		*parallel = 4
 	}
-	files := make([]string, cmd.Flag.NArg())
-	for i := 0; i < cmd.Flag.NArg(); i++ {
-		files[i] = cmd.Flag.Arg(i)
-	}
-	mr, err := MultiReader(files)
+	mr, err := MultiReader(cmd.Flag.Args())
 	if err != nil {
 		return err
 	}
@@ -231,7 +227,7 @@ func runInspect(cmd *cli.Command, args []string) error {
 
 	var grp errgroup.Group
 	sema := make(chan struct{}, *parallel)
-	for i := 1; ; i++ {
+	for {
 		sema <- struct{}{}
 
 		var b bytes.Buffer
@@ -241,9 +237,8 @@ func runInspect(cmd *cli.Command, args []string) error {
 			}
 			return err
 		}
-		j := i
 		grp.Go(func() error {
-			err := inspectCadus(&b, j, *count)
+			err := inspectCadus(&b, *count)
 			<-sema
 			return err
 		})
@@ -294,14 +289,10 @@ func runReplay(cmd *cli.Command, args []string) error {
 		err error
 	)
 	if *pcap {
-		r, err = PCAPReader(cmd.Flag.Arg(1), *filter)
+		r, err = PCAPReader(cmd.Flag.Arg(0), *filter)
 		*count = 0
 	} else {
-		files := make([]string, cmd.Flag.NArg())
-		for i := 0; i < cmd.Flag.NArg(); i++ {
-			files[i] = cmd.Flag.Arg(i)
-		}
-		r, err = MultiReader(files)
+		r, err = MultiReader(cmd.Flag.Args())
 	}
 	if err != nil {
 		return err
