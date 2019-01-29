@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"hash/adler32"
 	"io"
 	"log"
 	"net"
@@ -14,6 +15,72 @@ import (
 	"github.com/juju/ratelimit"
 	"github.com/midbel/ringbuffer"
 )
+
+func inspectCadus(rs io.Reader, skip int) error {
+	var (
+		size    uint64
+		average uint64
+		filler  uint64
+		prefix  uint64
+		missing uint64
+		invalid uint64
+		total   uint64
+		hrdl    uint64
+		buffer  []byte
+	)
+
+	r := CaduReader(rs, skip)
+	body := make([]byte, 1008)
+	sum := adler32.Checksum(body)
+	for {
+		n, err := io.ReadFull(r, body)
+		size += uint64(n)
+		if n > 0 {
+			total++
+		}
+		if err == io.EOF {
+			break
+		}
+		if err == nil {
+			if sum == adler32.Checksum(body) {
+				filler++
+				size -= uint64(n)
+				continue
+			}
+			var offset int
+			if bytes.HasPrefix(body, Word) {
+				buffer = buffer[:0]
+				offset += WordLen
+				prefix++
+				hrdl++
+
+				average += uint64(binary.LittleEndian.Uint32(body[WordLen:]))
+			}
+			buffer = append(buffer, body...)
+			for offset < len(buffer) {
+				if ix := bytes.Index(buffer[offset:], Word); ix < 0 {
+					buffer = buffer[offset:]
+					break
+				} else {
+					hrdl++
+					if len(buffer[offset+ix:]) >= 8 {
+						average += uint64(binary.LittleEndian.Uint32(buffer[offset+ix+WordLen:]))
+					}
+					offset = offset + ix + WordLen
+				}
+			}
+		} else if IsCRCError(err) {
+			invalid++
+		} else if n, ok := IsMissingCadu(err); ok {
+			missing += uint64(n)
+		} else {
+			return err
+		}
+	}
+	const row = "%7d cadus (%3dKB), %8d missing, %4d invalid, %4d filler, %7d packets (avg: %4dKB, sum: %6dKB)"
+	log.Printf(row, total, size>>10, missing, invalid, filler, hrdl, (average/hrdl)>>10, average>>10)
+	return nil
+}
 
 func replayCadus(addr string, r io.Reader, rate int) (*coze, error) {
 	c, err := net.Dial(protoFromAddr(addr))
@@ -34,7 +101,7 @@ func replayCadus(addr string, r io.Reader, rate int) (*coze, error) {
 
 	var (
 		size, count int
-		z coze
+		z           coze
 	)
 
 	for {
@@ -56,8 +123,8 @@ func replayCadus(addr string, r io.Reader, rate int) (*coze, error) {
 		default:
 		}
 	}
-	z.Count+=count
-	z.Size+=size
+	z.Count += count
+	z.Size += size
 	return &z, nil
 }
 

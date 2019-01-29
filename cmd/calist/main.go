@@ -61,15 +61,15 @@ func main() {
 			os.Exit(2)
 		}
 	}
-	ratio := float64(z.Missing)/float64(z.Count+z.Missing)
+	ratio := float64(z.Missing) / float64(z.Count+z.Missing)
 	fmt.Fprintf(os.Stdout, line, z.Count, z.Count+z.Missing, z.Gaps, z.Elapsed, z.Missing, ratio*100, z.Size>>10)
 	fmt.Fprintln(os.Stdout)
 }
 
 func listCadus(h *pcap.Handle, c *Coze, list, gap bool) error {
 	d := struct {
-		Curr uint32
-		When time.Time
+		Curr    uint32
+		When    time.Time
 		Elapsed time.Duration
 	}{}
 
@@ -121,10 +121,10 @@ func listCadus(h *pcap.Handle, c *Coze, list, gap bool) error {
 			fmt.Fprintf(os.Stdout, "%8d | %12s | %s | %s:%s | %s:%s | %s | %6d | %d\n", c.Count, d.Elapsed, t.Format(time.RFC3339), sn, sp, dn, dp, proto, len(xs), missing)
 		}
 		if !d.When.IsZero() {
-				d.Elapsed += t.Sub(d.When)
-				if d.Elapsed < 0 {
-					d.Elapsed = 0
-				}
+			d.Elapsed += t.Sub(d.When)
+			if d.Elapsed < 0 {
+				d.Elapsed = 0
+			}
 		}
 		d.Curr, d.When = curr, t
 	}

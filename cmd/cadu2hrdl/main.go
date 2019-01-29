@@ -30,6 +30,8 @@ var (
 
 const WordLen = 4
 
+const VCDUSize = 1024
+
 const (
 	hdkInstance = 0
 	hdkVersion  = 0
@@ -141,6 +143,19 @@ options:
 		Short: "give statistics on incoming cadus stream",
 		Run:   runTrace,
 	},
+	{
+		Usage: "inspect [-c] [-e] [-p] <file...>",
+		Alias: []string{"dig"},
+		Short: "try to analyse how HRDL are organized into cadus",
+		Run:   runInspect,
+		Desc: `
+options:
+
+  -c COUNT     skip COUNT bytes between each packets
+  -e EVERY     create reports by slice of EVERY packets
+  -p PARALLEL  create reports in parallel workers
+`,
+	},
 }
 
 const Program = "c2h"
@@ -191,6 +206,50 @@ func main() {
 	}
 }
 
+func runInspect(cmd *cli.Command, args []string) error {
+	count := cmd.Flag.Int("c", 0, "bytes to skip")
+	every := cmd.Flag.Int("e", 4096, "stats every x packets")
+	parallel := cmd.Flag.Int("p", 4, "parallel reader")
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	if *every <= 0 {
+		*every = 4096
+	}
+	if *parallel <= 0 || *parallel >= 64 {
+		*parallel = 4
+	}
+	files := make([]string, cmd.Flag.NArg())
+	for i := 0; i < cmd.Flag.NArg(); i++ {
+		files[i] = cmd.Flag.Arg(i)
+	}
+	mr, err := MultiReader(files)
+	if err != nil {
+		return err
+	}
+	fill := VCDUSize + *count
+
+	var grp errgroup.Group
+	sema := make(chan struct{}, *parallel)
+	for {
+		sema <- struct{}{}
+
+		var b bytes.Buffer
+		if _, err := io.CopyN(&b, mr, int64(*every*fill)); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+		grp.Go(func() error {
+			err := inspectCadus(&b, *count)
+			<-sema
+			return err
+		})
+	}
+	return grp.Wait()
+}
+
 func runRelay(cmd *cli.Command, args []string) error {
 	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
 	c := cmd.Flag.Int("c", 8, "number of connections to remote server")
@@ -237,9 +296,9 @@ func runReplay(cmd *cli.Command, args []string) error {
 		r, err = PCAPReader(cmd.Flag.Arg(1), *filter)
 		*count = 0
 	} else {
-		files := make([]string, cmd.Flag.NArg()-1)
-		for i := 1; i < cmd.Flag.NArg(); i++ {
-			files[i-1] = cmd.Flag.Arg(i)
+		files := make([]string, cmd.Flag.NArg())
+		for i := 0; i < cmd.Flag.NArg(); i++ {
+			files[i] = cmd.Flag.Arg(i)
 		}
 		r, err = MultiReader(files)
 	}
