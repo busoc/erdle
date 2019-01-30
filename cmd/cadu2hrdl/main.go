@@ -296,22 +296,22 @@ func (c *chunker) Read(bs []byte) (int, error) {
 		c.buffer.Write(c.scanner.Bytes())
 	}
 	var b bytes.Buffer
+	b.Write(Magic)
+
 	w := io.MultiWriter(&b, c.digest)
 
-	w.Write(Magic)
-	binary.Write(w, binary.BigEndian, uint32(0x45c7))
+	binary.Write(w, binary.BigEndian, uint16(0x45c7))
 	binary.Write(w, binary.BigEndian, c.counter<<8)
 	binary.Write(w, binary.BigEndian, uint32(0xfdc33fff))
 	if n, _ := io.CopyN(w, &c.buffer, 1008); n < 1008 {
 		w.Write(make([]byte, 1008-n))
 	}
-	binary.Write(w, binary.BigEndian, uint16(c.digest.Sum32()))
+	binary.Write(&b, binary.BigEndian, uint16(c.digest.Sum32()))
 
 	c.counter++
 	if c.counter > 0xFFFFFF {
 		c.counter = 0
 	}
-
 	return io.ReadAtLeast(&b, bs, 1024)
 }
 
