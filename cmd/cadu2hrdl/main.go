@@ -1,15 +1,18 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"log"
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"text/template"
@@ -144,7 +147,7 @@ options:
 		Run:   runTrace,
 	},
 	{
-		Usage: "inspect [-c] [-e] [-p] <file...>",
+		Usage: "inspect [-c count] [-e every] [-p parallel] <file...>",
 		Alias: []string{"dig"},
 		Short: "try to analyse how HRDL are organized into cadus",
 		Run:   runInspect,
@@ -155,6 +158,11 @@ options:
   -e EVERY     create reports by slice of EVERY packets
   -p PARALLEL  create reports in parallel workers
 `,
+	},
+	{
+		Usage: "split [-d dir] <file...>",
+		Short: "split packets from RT files into cadus",
+		Run:   runSplit,
 	},
 }
 
@@ -204,6 +212,107 @@ func main() {
 	if err := cli.Run(commands, usage, nil); err != nil {
 		log.Fatalln(err)
 	}
+}
+
+func runSplit(cmd *cli.Command, args []string) error {
+	file := cmd.Flag.String("f", filepath.Join(os.TempDir(), "cadus.dat"), "")
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	w, err := os.Create(*file)
+	if err != nil {
+		return err
+	}
+	defer w.Close()
+
+	body := make([]byte, VCDUSize)
+	for _, p := range cmd.Flag.Args() {
+		r, err := OpenRT(p)
+		if err != nil {
+			return err
+		}
+		_, err = io.CopyBuffer(w, r, body)
+		r.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type chunker struct {
+	io.Closer
+
+	counter uint32
+	digest  hash.Hash32
+	buffer  bytes.Buffer
+	scanner *bufio.Scanner
+}
+
+func OpenRT(file string) (io.ReadCloser, error) {
+	r, err := os.Open(file)
+	if err != nil {
+		return nil, err
+	}
+	s := bufio.NewScanner(r)
+	s.Buffer(make([]byte, 8<<20), 8<<20)
+	s.Split(scanPackets)
+
+	c := chunker{
+		Closer:  r,
+		scanner: s,
+		digest:  SumVCDU(),
+	}
+	return &c, nil
+}
+
+func scanPackets(bs []byte, ateof bool) (int, []byte, error) {
+	if ateof {
+		return len(bs), bs, bufio.ErrFinalToken
+	}
+	if len(bs) < 4 {
+		return 0, nil, nil
+	}
+	size := int(binary.LittleEndian.Uint32(bs)) + 4
+	if len(bs) < size {
+		return 0, nil, nil
+	}
+	vs := make([]byte, size-18)
+	copy(vs, bs[18:])
+	return size, vs, nil
+}
+
+func (c *chunker) Read(bs []byte) (int, error) {
+	defer c.digest.Reset()
+
+	if c.buffer.Len() == 0 {
+		if !c.scanner.Scan() {
+			err := c.scanner.Err()
+			if err == nil {
+				err = io.EOF
+			}
+			return 0, err
+		}
+		c.buffer.Write(c.scanner.Bytes())
+	}
+	var b bytes.Buffer
+	w := io.MultiWriter(&b, c.digest)
+
+	w.Write(Magic)
+	binary.Write(w, binary.BigEndian, uint32(0x45c7))
+	binary.Write(w, binary.BigEndian, c.counter<<8)
+	binary.Write(w, binary.BigEndian, uint32(0xfdc33fff))
+	if n, _ := io.CopyN(w, &c.buffer, 1008); n < 1008 {
+		w.Write(make([]byte, 1008-n))
+	}
+	binary.Write(w, binary.BigEndian, uint16(c.digest.Sum32()))
+
+	c.counter++
+	if c.counter > 0xFFFFFF {
+		c.counter = 0
+	}
+
+	return io.ReadAtLeast(&b, bs, 1024)
 }
 
 func runInspect(cmd *cli.Command, args []string) error {
@@ -289,10 +398,14 @@ func runReplay(cmd *cli.Command, args []string) error {
 		err error
 	)
 	if *pcap {
-		r, err = PCAPReader(cmd.Flag.Arg(0), *filter)
+		r, err = PCAPReader(cmd.Flag.Arg(1), *filter)
 		*count = 0
 	} else {
-		r, err = MultiReader(cmd.Flag.Args())
+		files := make([]string, cmd.Flag.NArg()-1)
+		for i := 1; i < cmd.Flag.NArg(); i++ {
+			files[i-1] = cmd.Flag.Arg(i)
+		}
+		r, err = MultiReader(files)
 	}
 	if err != nil {
 		return err
