@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"time"
 )
@@ -182,55 +183,71 @@ func dumpErdle(i int, r io.Reader) {
 		property uint8
 		stream   uint16
 		counter  uint32
+		cksum    uint32
 		acqtime  time.Duration
 		auxtime  time.Duration
 	)
 	binary.Read(r, binary.LittleEndian, &sync)
 	binary.Read(r, binary.LittleEndian, &size)
-	binary.Read(r, binary.LittleEndian, &channel)
-	binary.Read(r, binary.LittleEndian, &source)
-	binary.Read(r, binary.LittleEndian, &spare)
-	binary.Read(r, binary.LittleEndian, &sequence)
-	binary.Read(r, binary.LittleEndian, &coarse)
-	binary.Read(r, binary.LittleEndian, &fine)
-	binary.Read(r, binary.LittleEndian, &spare)
+
+	digest := SumHRDL()
+	rw := io.TeeReader(r, digest)
+	binary.Read(rw, binary.LittleEndian, &channel)
+	binary.Read(rw, binary.LittleEndian, &source)
+	binary.Read(rw, binary.LittleEndian, &spare)
+	binary.Read(rw, binary.LittleEndian, &sequence)
+	binary.Read(rw, binary.LittleEndian, &coarse)
+	binary.Read(rw, binary.LittleEndian, &fine)
+	binary.Read(rw, binary.LittleEndian, &spare)
 
 	vt := joinTime6(coarse, fine).Format("2006-01-02 15:04:05.000")
 
-	binary.Read(r, binary.LittleEndian, &property)
-	binary.Read(r, binary.LittleEndian, &stream)
-	binary.Read(r, binary.LittleEndian, &counter)
-	binary.Read(r, binary.LittleEndian, &acqtime)
-	binary.Read(r, binary.LittleEndian, &auxtime)
-	binary.Read(r, binary.LittleEndian, &origin)
+	binary.Read(rw, binary.LittleEndian, &property)
+	binary.Read(rw, binary.LittleEndian, &stream)
+	binary.Read(rw, binary.LittleEndian, &counter)
+	binary.Read(rw, binary.LittleEndian, &acqtime)
+	binary.Read(rw, binary.LittleEndian, &auxtime)
+	binary.Read(rw, binary.LittleEndian, &origin)
 
 	at := gpsEpoch.Add(acqtime).Format("2006-01-02 15:04:05.000")
 
 	var mode string
+	rest := int(size) - (16 + 24) //16(VMU header length) + 24(HRD common header length)
 	if origin == source {
 		mode = "realtime"
 	} else {
 		mode = "playback"
 	}
 	var upi string
-	switch property >> 4 {
-	case 1:
+	switch channel {
+	case 3:
 		bs := make([]byte, 32)
-		if _, err := io.ReadFull(r, bs); err == nil {
+		if _, err := io.ReadFull(rw, bs); err == nil {
 			upi = string(bytes.Trim(bs, "\x00"))
 		} else {
 			upi = "SCIENCE"
 		}
-	case 2:
+		rest -= len(bs)
+	case 1, 2:
 		bs := make([]byte, 52)
-		if _, err := io.ReadFull(r, bs); err == nil {
+		if _, err := io.ReadFull(rw, bs); err == nil {
 			upi = string(bytes.Trim(bs[20:], "\x00"))
 		} else {
 			upi = "IMAGE"
 		}
+		rest -= len(bs)
 	}
+	if _, err := io.CopyN(ioutil.Discard, rw, int64(rest)); err != nil {
+		return
+	}
+	binary.Read(r, binary.LittleEndian, &cksum)
 
-	log.Printf("%7d | %8d || %02x | %8d | %s || %s | %02x | %8d | %s | %s", i, size, channel, sequence, vt, mode, origin, counter, at, upi)
+	const row = "%7d | %8d || %02x | %8d | %s || %s | %02x | %8d | %s | %s || %08x | %08x | %s"
+	valid := "ok"
+	if cksum != digest.Sum32() {
+		valid = "bad"
+	}
+	log.Printf(row, i, size, channel, sequence, vt, mode, origin, counter, at, upi, cksum, digest.Sum32(), valid)
 }
 
 func joinTime6(coarse uint32, fine uint16) time.Time {
