@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"hash/adler32"
 	"io"
 	"io/ioutil"
 	"log"
@@ -61,11 +60,13 @@ func countCadus(r io.Reader) error {
 
 func listCadus(r io.Reader) error {
 	body := make([]byte, 1024)
-	sum := adler32.Checksum(body[14:1022])
 
 	const row = "%9d | %s | %x | %x | %x | %12d | %12d | %3d | %7d | %9dKB | %s"
 
-	var count uint64
+	var (
+		count  uint64
+		buffer []byte
+	)
 	for i := 0; ; i++ {
 		_, err := r.Read(body)
 		if err == io.EOF {
@@ -73,10 +74,10 @@ func listCadus(r io.Reader) error {
 		}
 		var missing int
 		if m, ok := IsMissingCadu(err); err != nil && !(ok || IsCRCError(err)) {
-			log.Println(err)
 			return err
 		} else {
 			missing = m
+			buffer = buffer[:0]
 		}
 		var (
 			magic   uint32
@@ -87,9 +88,8 @@ func listCadus(r io.Reader) error {
 			filler  string
 		)
 		var (
-			buffer []byte
-			hrdl  uint64
-			size  uint64
+			hrdl uint64
+			size uint64
 		)
 		rs := bytes.NewReader(body)
 		binary.Read(rs, binary.BigEndian, &magic)
@@ -97,36 +97,29 @@ func listCadus(r io.Reader) error {
 		binary.Read(rs, binary.BigEndian, &seq)
 		binary.Read(rs, binary.BigEndian, &control)
 
-		filler = "-"
-		if s := adler32.Checksum(body[14:1022]); s == sum {
-			filler = "v"
-			buffer = buffer[:0]
-		} else {
-			buffer = append(buffer, body[14:1022]...)
-			var offset int
-			for offset < len(buffer) {
-				if ix := bytes.Index(buffer[offset:], Word); ix < 0 {
-					buffer = buffer[offset:]
-					break
-				} else {
+		buffer = append(buffer, body[14:1022]...)
+		var offset int
+		for offset < len(buffer) {
+			if ix := bytes.Index(buffer[offset:], Word); ix < 0 {
+				break
+			} else {
+				cut := offset + ix + WordLen
+				if len(buffer[cut:]) >= 4 {
 					hrdl++
-					offset = offset + ix + WordLen
-					if offset < len(buffer) && len(buffer[offset:]) >= 4 {
-						size += uint64(binary.LittleEndian.Uint32(buffer[offset:]))
-					} else {
-						xs := make([]byte, 4)
-						copy(xs, buffer[offset:])
-						size += uint64(binary.LittleEndian.Uint32(xs))
-					}
+					size += uint64(binary.LittleEndian.Uint32(buffer[cut:]))
+					offset = cut + WordLen
+				} else {
+					break
 				}
 			}
-			count += hrdl
+		}
+		buffer = buffer[offset:]
+		count += hrdl
 
-			if err != nil {
-				valid = err.Error()
-			} else {
-				valid = "-"
-			}
+		if err != nil {
+			valid = err.Error()
+		} else {
+			valid = "-"
 		}
 
 		log.Printf(row, i, filler, magic, pid, control, seq>>8, missing, hrdl, count, size>>10, valid)
@@ -183,34 +176,41 @@ func countHRDL(r io.Reader, by string) error {
 
 func listHRDL(r io.Reader, raw bool) error {
 	body := make([]byte, 8<<20)
-	var total, size, errCRC, errMissing int
+	var total, size, errCRC, errMissing, invalid int
 	for i := 1; ; i++ {
-		if n, err := r.Read(body); err == nil {
-			total++
-			size += n
-			if raw {
-				log.Printf("%6d | %x | %x | %x", i, body[:8], body[8:24], body[24:48])
-			} else {
-				// dumpErdle(i, bytes.NewReader(bytes.Replace(body[:n], Stuff, Word, -1)))
-				dumpErdle(i, bytes.NewReader(body[:n]))
+		n, err := r.Read(body)
+
+		size += n
+		if err != nil {
+			if err == io.EOF {
+				break
 			}
-		} else if err == io.EOF {
-			break
-		} else if n, ok := IsMissingCadu(err); ok {
-			size += n
-			errMissing += n
-		} else if IsCRCError(err) {
-			size += n
-			errCRC++
+			if n, ok := IsMissingCadu(err); ok {
+				errMissing += n
+			} else if IsCRCError(err) {
+				errCRC++
+			} else {
+				return err
+			}
+		}
+		total++
+		if raw {
+			log.Printf("%6d | %x | %x | %x", i, body[:8], body[8:24], body[24:48])
 		} else {
-			break
+			if err := dumpErdle(i, bytes.NewReader(body[:n])); err != nil {
+				if err == ErrInvalid {
+					invalid++
+				} else {
+					return err
+				}
+			}
 		}
 	}
-	log.Printf("%d HRDL packets (%d KB, %d missing cadus, %d corrupted)", total, size>>10, errMissing, errCRC)
+	log.Printf("%d HRDL packets, %d invalid HRDL (%d KB, %d missing cadus, %d corrupted)", total, invalid, size>>10, errMissing, errCRC)
 	return nil
 }
 
-func dumpErdle(i int, r io.Reader) {
+func dumpErdle(i int, r io.Reader) error {
 	var (
 		sync     uint32
 		size     uint32
@@ -278,17 +278,22 @@ func dumpErdle(i int, r io.Reader) {
 		}
 		rest -= len(bs)
 	}
-	if _, err := io.CopyN(ioutil.Discard, rw, int64(rest)); err != nil {
-		return
+	var err error
+	if _, err = io.CopyN(ioutil.Discard, rw, int64(rest)); err != nil {
+		return ErrInvalid
 	}
-	binary.Read(r, binary.LittleEndian, &cksum)
+	if err = binary.Read(r, binary.LittleEndian, &cksum); err != nil {
+		return ErrInvalid
+	}
 
 	const row = "%7d | %8d || %02x | %8d | %s || %s | %02x | %8d | %s | %s || %08x | %08x | %s"
 	valid := "ok"
 	if cksum != digest.Sum32() {
+		err = ErrInvalid
 		valid = "bad"
 	}
 	log.Printf(row, i, size, channel, sequence, vt, mode, origin, counter, at, upi, cksum, digest.Sum32(), valid)
+	return err
 }
 
 func joinTime6(coarse uint32, fine uint16) time.Time {

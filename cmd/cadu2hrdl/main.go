@@ -23,7 +23,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var ErrSkip = errors.New("skip")
+var (
+	ErrSkip    = errors.New("skip")
+	ErrInvalid = errors.New("invalid")
+)
 
 var (
 	Word  = []byte{0xf8, 0x2e, 0x35, 0x53}
