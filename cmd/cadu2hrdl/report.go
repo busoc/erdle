@@ -114,7 +114,7 @@ func countHRDL(r io.Reader, by string) error {
 
 	body := make([]byte, 8<<20)
 	for i := 1; ; i++ {
-		_, err := r.Read(body)
+		n, err := r.Read(body)
 		if err != nil {
 			if err == io.EOF {
 				break
@@ -130,7 +130,8 @@ func countHRDL(r io.Reader, by string) error {
 		}
 
 		zs[i].Count++
-		zs[i].Size += len(body) - 12
+		zs[i].Size += n - 12
+		//zs[i].Size += len(body) - 12
 		if diff := s - ps[i]; diff != s && diff > 1 {
 			zs[i].Missing += diff - 1
 		}
