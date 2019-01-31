@@ -426,7 +426,7 @@ func runReplay(cmd *cli.Command, args []string) error {
 					return
 				}
 			}
-			}()
+		}()
 		r = io.TeeReader(r, pw)
 	}
 

@@ -80,7 +80,7 @@ func inspectCadus(rs io.Reader, skip int) error {
 	const row = "%7d cadus (%3dKB), %8d missing, %4d invalid, %4d filler, %7d packets (avg: %4dKB, sum: %6dKB)"
 	var avg uint64
 	if hrdl > 0 {
-		avg = (average/hrdl) >> 10
+		avg = (average / hrdl) >> 10
 	}
 	log.Printf(row, total, size>>10, missing, invalid, filler, hrdl, avg, average>>10)
 	return nil

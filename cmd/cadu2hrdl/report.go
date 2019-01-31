@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"hash/adler32"
 	"io"
 	"io/ioutil"
 	"log"
@@ -60,6 +61,11 @@ func countCadus(r io.Reader) error {
 
 func listCadus(r io.Reader) error {
 	body := make([]byte, 1024)
+	sum := adler32.Checksum(body[14:1022])
+
+	const row = "%9d | %s | %x | %x | %x | %12d | %12d | %3d | %7d | %9dKB | %s"
+
+	var count uint64
 	for i := 0; ; i++ {
 		_, err := r.Read(body)
 		if err == io.EOF {
@@ -73,23 +79,57 @@ func listCadus(r io.Reader) error {
 			missing = m
 		}
 		var (
-			magic uint32
-			seq   uint32
-			pid   uint16
-			valid string
+			magic   uint32
+			seq     uint32
+			control uint32
+			pid     uint16
+			valid   string
+			filler  string
+		)
+		var (
+			buffer []byte
+			hrdl  uint64
+			size  uint64
 		)
 		rs := bytes.NewReader(body)
 		binary.Read(rs, binary.BigEndian, &magic)
 		binary.Read(rs, binary.BigEndian, &pid)
 		binary.Read(rs, binary.BigEndian, &seq)
+		binary.Read(rs, binary.BigEndian, &control)
 
-		if err != nil {
-			valid = err.Error()
+		filler = "-"
+		if s := adler32.Checksum(body[14:1022]); s == sum {
+			filler = "v"
+			buffer = buffer[:0]
 		} else {
-			valid = "-"
+			buffer = append(buffer, body[14:1022]...)
+			var offset int
+			for offset < len(buffer) {
+				if ix := bytes.Index(buffer[offset:], Word); ix < 0 {
+					buffer = buffer[offset:]
+					break
+				} else {
+					hrdl++
+					offset = offset + ix + WordLen
+					if offset < len(buffer) && len(buffer[offset:]) >= 4 {
+						size += uint64(binary.LittleEndian.Uint32(buffer[offset:]))
+					} else {
+						xs := make([]byte, 4)
+						copy(xs, buffer[offset:])
+						size += uint64(binary.LittleEndian.Uint32(xs))
+					}
+				}
+			}
+			count += hrdl
+
+			if err != nil {
+				valid = err.Error()
+			} else {
+				valid = "-"
+			}
 		}
 
-		log.Printf("%5d | %x | %1d | %12d | %12d | %s", i, magic, pid&0x003F, seq>>8, missing, valid)
+		log.Printf(row, i, filler, magic, pid, control, seq>>8, missing, hrdl, count, size>>10, valid)
 	}
 	return nil
 }
@@ -131,7 +171,6 @@ func countHRDL(r io.Reader, by string) error {
 
 		zs[i].Count++
 		zs[i].Size += n - 12
-		//zs[i].Size += len(body) - 12
 		if diff := s - ps[i]; diff != s && diff > 1 {
 			zs[i].Missing += diff - 1
 		}
@@ -152,6 +191,7 @@ func listHRDL(r io.Reader, raw bool) error {
 			if raw {
 				log.Printf("%6d | %x | %x | %x", i, body[:8], body[8:24], body[24:48])
 			} else {
+				// dumpErdle(i, bytes.NewReader(bytes.Replace(body[:n], Stuff, Word, -1)))
 				dumpErdle(i, bytes.NewReader(body[:n]))
 			}
 		} else if err == io.EOF {
