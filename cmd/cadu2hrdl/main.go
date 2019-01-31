@@ -390,6 +390,7 @@ func runReplay(cmd *cli.Command, args []string) error {
 	filter := cmd.Flag.String("x", "", "pcap filter")
 	count := cmd.Flag.Int("c", 0, "bytes to skip before each packets")
 	rate := cmd.Flag.Int("r", 8<<20, "output bandwith usage")
+	inspect := cmd.Flag.Bool("i", false, "inspect vcdu stream")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
@@ -410,8 +411,27 @@ func runReplay(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	r = VCDUReader(r, *count)
+	if *inspect {
+		pr, pw := io.Pipe()
+		defer pw.Close()
+		go func() {
+			defer pw.Close()
+			for {
+				var b bytes.Buffer
+				if _, err := io.CopyN(&b, pr, int64(*rate)); err != nil {
+					return
+				}
+				if err := inspectCadus(&b, 0); err != nil {
+					return
+				}
+			}
+			}()
+		r = io.TeeReader(r, pw)
+	}
+
 	n := time.Now()
-	z, err := replayCadus(cmd.Flag.Arg(0), VCDUReader(r, *count), *rate)
+	z, err := replayCadus(cmd.Flag.Arg(0), r, *rate)
 	if err == nil {
 		log.Printf("%d packets (%dMB, %s)", z.Count, z.Size>>20, time.Since(n))
 	}

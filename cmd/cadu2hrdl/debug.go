@@ -33,7 +33,7 @@ func inspectCadus(rs io.Reader, skip int) error {
 	body := make([]byte, 1008)
 	sum := adler32.Checksum(body)
 	for {
-		n, err := io.ReadFull(r, body)
+		n, err := r.Read(body)
 		size += uint64(n)
 		if n > 0 {
 			total++
@@ -78,10 +78,11 @@ func inspectCadus(rs io.Reader, skip int) error {
 		}
 	}
 	const row = "%7d cadus (%3dKB), %8d missing, %4d invalid, %4d filler, %7d packets (avg: %4dKB, sum: %6dKB)"
-	if hrdl == 0 {
-		hrdl = 1
+	var avg uint64
+	if hrdl > 0 {
+		avg = (average/hrdl) >> 10
 	}
-	log.Printf(row, total, size>>10, missing, invalid, filler, hrdl, (average/hrdl)>>10, average>>10)
+	log.Printf(row, total, size>>10, missing, invalid, filler, hrdl, avg, average>>10)
 	return nil
 }
 
@@ -106,7 +107,6 @@ func replayCadus(addr string, r io.Reader, rate int) (*coze, error) {
 		size, count int
 		z           coze
 	)
-
 	for {
 		if n, err := io.CopyN(w, r, 1024); err != nil {
 			if err == io.EOF {
