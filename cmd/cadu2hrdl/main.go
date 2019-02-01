@@ -168,6 +168,11 @@ options:
 		Short: "split packets from RT files into cadus",
 		Run:   runSplit,
 	},
+	{
+		Usage: "index [-c] <file...>",
+		Short: "create an index of hrdl packets by cadus",
+		Run:   runIndex,
+	},
 }
 
 const Program = "c2h"
@@ -216,6 +221,26 @@ func main() {
 	if err := cli.Run(commands, usage, nil); err != nil {
 		log.Fatalln(err)
 	}
+}
+
+func runIndex(cmd *cli.Command, args []string) error {
+	count := cmd.Flag.Int("c", 0, "skip count bytes")
+	if err := cmd.Flag.Parse(args); err != nil {
+		return err
+	}
+	mr, err := MultiReader(cmd.Flag.Args())
+	if err != nil {
+		return err
+	}
+	r := VCDUReader(mr, *count)
+	body := make([]byte, 1024)
+	for {
+		_, err := r.Read(body)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func runSplit(cmd *cli.Command, args []string) error {
