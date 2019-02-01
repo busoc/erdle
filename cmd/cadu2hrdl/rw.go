@@ -160,13 +160,13 @@ func (r *hrdlReader) Read(bs []byte) (int, error) {
 	case nil:
 		r.rest = rest
 
-		z := binary.LittleEndian.Uint32(buffer[4:]) + 12
-		switch x, z := len(buffer), int(z); {
-		default:
-		case x > z:
-			buffer = buffer[:z]
-		case x < z:
-		}
+		// z := binary.LittleEndian.Uint32(buffer[4:]) + 12
+		// switch x, z := len(buffer), int(z); {
+		// default:
+		// case x > z:
+		// 	buffer = buffer[:z]
+		// case x < z:
+		// }
 		return copy(bs, buffer), err
 	case ErrSkip:
 		return r.Read(bs)
@@ -176,22 +176,18 @@ func (r *hrdlReader) Read(bs []byte) (int, error) {
 }
 
 func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
-	var offset int
+	var (
+		offset int
+		buffer []byte
+	)
 
-	// block, buffer := make([]byte, 1008), rest
-	var buffer []byte
 	if len(rest) > 0 {
 		buffer = append(buffer, rest...)
 	}
 	block := make([]byte, 1008)
-	// rest = rest[:0]
 	for {
 		n, err := r.Read(block)
 		if err != nil {
-			// if !IsCaduError(err) {
-			// } else {
-			// 	return nil, nil, ErrSkip
-			// }
 			return nil, nil, err
 		}
 		buffer = append(buffer, block[:n]...)
@@ -211,10 +207,6 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 		n, err := r.Read(block)
 		if err != nil {
 			return nil, nil, err
-			// if !IsCaduError(err) {
-			// } else {
-			// 	return nil, nil, ErrSkip
-			// }
 		}
 		buffer = append(buffer, block[:n]...)
 		if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {

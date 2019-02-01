@@ -1,11 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"crypto/md5"
 	"encoding/binary"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"time"
 )
@@ -61,14 +62,15 @@ func countCadus(r io.Reader) error {
 func listCadus(r io.Reader) error {
 	body := make([]byte, 1024)
 
-	const row = "%9d | %s | %x | %x | %x | %12d | %12d | %3d | %7d | %9dKB | %s"
+	const row = "%9d | %x | %x | %x | %12d | %7d | %12d | %3d | %7d | %9dKB | %s"
 
 	var (
 		count  uint64
 		buffer []byte
 	)
+	rs := bufio.NewReader(r)
 	for i := 0; ; i++ {
-		_, err := r.Read(body)
+		_, err := rs.Read(body)
 		if err == io.EOF {
 			break
 		}
@@ -80,12 +82,12 @@ func listCadus(r io.Reader) error {
 			buffer = buffer[:0]
 		}
 		var (
+			last    uint32
 			magic   uint32
 			seq     uint32
 			control uint32
 			pid     uint16
 			valid   string
-			filler  string
 		)
 		var (
 			hrdl uint64
@@ -104,7 +106,7 @@ func listCadus(r io.Reader) error {
 				break
 			} else {
 				cut := offset + ix + WordLen
-				if len(buffer[cut:]) >= 4 {
+				if len(buffer[cut:]) >= WordLen {
 					hrdl++
 					size += uint64(binary.LittleEndian.Uint32(buffer[cut:]))
 					offset = cut + WordLen
@@ -122,7 +124,10 @@ func listCadus(r io.Reader) error {
 			valid = "-"
 		}
 
-		log.Printf(row, i, filler, magic, pid, control, seq>>8, missing, hrdl, count, size>>10, valid)
+		log.Printf(row, i, magic, pid, control, seq>>8, (seq>>8)-(last>>8), missing, hrdl, count, size>>10, valid)
+		if hrdl > 0 {
+			last = seq
+		}
 	}
 	return nil
 }
@@ -161,6 +166,11 @@ func countHRDL(r io.Reader, by string) error {
 		if _, ok := zs[i]; !ok {
 			zs[i] = &coze{}
 		}
+		if z := binary.LittleEndian.Uint32(body[4:]); int(z) != n-12 {
+			zs[i].Invalid++
+		} else if s := SumHRD(body[8 : n-4]); s != binary.LittleEndian.Uint32(body[n-4:]) {
+			zs[i].Invalid++
+		}
 
 		zs[i].Count++
 		zs[i].Size += n - 12
@@ -169,14 +179,14 @@ func countHRDL(r io.Reader, by string) error {
 		}
 	}
 	for i, e := range zs {
-		log.Printf("%02x: %7d packets, %7d missing, %7dMB", i, e.Count, e.Missing, e.Size>>20)
+		log.Printf("%02x: %7d packets, %7d missing, %4d invalid, %7dMB", i, e.Count, e.Missing, e.Invalid, e.Size>>20)
 	}
 	return nil
 }
 
 func listHRDL(r io.Reader, raw bool) error {
 	body := make([]byte, 8<<20)
-	var total, size, errCRC, errMissing, invalid int
+	var total, size, errCRC, errMissing, errInvalid, errLength int
 	for i := 1; ; i++ {
 		n, err := r.Read(body)
 
@@ -197,20 +207,23 @@ func listHRDL(r io.Reader, raw bool) error {
 		if raw {
 			log.Printf("%6d | %x | %x | %x", i, body[:8], body[8:24], body[24:48])
 		} else {
-			if err := dumpErdle(i, bytes.NewReader(body[:n])); err != nil {
+			x := bytes.Replace(body[:n], Stuff, Word[:3], -1)
+			if err := dumpErdle(i, bytes.NewReader(x)); err != nil {
 				if err == ErrInvalid {
-					invalid++
+					errInvalid++
+				} else if err == ErrLength {
+					errLength++
 				} else {
 					return err
 				}
 			}
 		}
 	}
-	log.Printf("%d HRDL packets, %d invalid HRDL (%d KB, %d missing cadus, %d corrupted)", total, invalid, size>>10, errMissing, errCRC)
+	log.Printf("%d HRDL packets, %d invalid cks, %d invalid len (%d KB, %d missing cadus, %d corrupted)", total, errInvalid, errLength, size>>10, errMissing, errCRC)
 	return nil
 }
 
-func dumpErdle(i int, r io.Reader) error {
+func dumpErdle(i int, r *bytes.Reader) error {
 	var (
 		sync     uint32
 		size     uint32
@@ -279,20 +292,22 @@ func dumpErdle(i int, r io.Reader) error {
 		rest -= len(bs)
 	}
 	var err error
-	if _, err = io.CopyN(ioutil.Discard, rw, int64(rest)); err != nil {
-		return ErrInvalid
+	md := md5.New()
+	if _, err = io.CopyN(md, rw, int64(rest)); err != nil {
+		return ErrLength
 	}
+	sum := digest.Sum32()
 	if err = binary.Read(r, binary.LittleEndian, &cksum); err != nil {
-		return ErrInvalid
+		return ErrLength
 	}
 
-	const row = "%7d | %8d || %02x | %8d | %s || %s | %02x | %8d | %s | %s || %08x | %08x | %s"
+	const row = "%7d | %8d || %02x | %8d | %s || %s | %02x | %8d | %s | %s || %08x | %08x | %4s || %x"
 	valid := "ok"
-	if cksum != digest.Sum32() {
+	if cksum != sum {
 		err = ErrInvalid
 		valid = "bad"
 	}
-	log.Printf(row, i, size, channel, sequence, vt, mode, origin, counter, at, upi, cksum, digest.Sum32(), valid)
+	log.Printf(row, i, size, channel, sequence, vt, mode, origin, counter, at, upi, cksum, sum, valid, md.Sum(nil))
 	return err
 }
 

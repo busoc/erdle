@@ -25,12 +25,13 @@ import (
 
 var (
 	ErrSkip    = errors.New("skip")
-	ErrInvalid = errors.New("invalid")
+	ErrInvalid = errors.New("hrdl: invalid checksum")
+	ErrLength  = errors.New("hrdl: invalid length")
 )
 
 var (
 	Word  = []byte{0xf8, 0x2e, 0x35, 0x53}
-	Stuff = []byte{0xf8, 0x2e, 0x35, 0xaa, 0x53}
+	Stuff = []byte{0xf8, 0x2e, 0x35, 0xaa}
 	Magic = []byte{0x1a, 0xcf, 0xfc, 0x1d}
 )
 
@@ -611,14 +612,15 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 		for bs := range queue {
 			atomic.AddInt64(&size, int64(len(bs)))
 			z := int(binary.LittleEndian.Uint32(bs[4:])) + 12
-			switch {
-			default:
-			case z < len(bs):
-				bs = bs[:z]
-			case z > len(bs):
-				atomic.AddInt64(&errLength, 1)
-				continue
-			}
+			// switch {
+			// default:
+			// case z < len(bs):
+			// 	bs = bs[:z]
+			// case z > len(bs):
+			// 	atomic.AddInt64(&errLength, 1)
+			// 	continue
+			// }
+			bs = bytes.Replace(bs, Stuff, Word[:3], -1)
 			if keep {
 				sum := binary.LittleEndian.Uint32(bs[z-4:])
 				var chk uint32
@@ -627,11 +629,12 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 				}
 				if chk != sum {
 					atomic.AddInt64(&errSum, 1)
+					// fmt.Printf("bad: want: %08x - got: %08x\n", sum, chk)
 					continue
 				}
 			}
 			select {
-			case q <- bytes.Replace(bs[8:], Stuff, Word, -1): //bs[8:]:
+			case q <- bs[8:z]: //bytes.Replace(bs[8:], Stuff, Word[:3], -1):
 				atomic.AddInt64(&count, 1)
 			default:
 				atomic.AddInt64(&dropped, 1)
