@@ -162,13 +162,17 @@ func countHRDL(r io.Reader, by string) error {
 			}
 			return err
 		}
-		i, s := byFunc(body[8:])
+		size := int(binary.LittleEndian.Uint32(body[4:])) + 12
+		xs := bytes.Replace(body[:n], Stuff, Word[:3], -1)
+
+		i, s := byFunc(xs[8:])
 		if _, ok := zs[i]; !ok {
 			zs[i] = &coze{}
 		}
-		if z := binary.LittleEndian.Uint32(body[4:]); int(z) != n-12 {
+		xs = xs[:size]
+		if z := binary.LittleEndian.Uint32(xs[4:]); int(z) != size-12 {
 			zs[i].Invalid++
-		} else if s := SumHRD(body[8 : n-4]); s != binary.LittleEndian.Uint32(body[n-4:]) {
+		} else if s := SumHRD(xs[8:len(xs)-4]); s != binary.LittleEndian.Uint32(xs[len(xs)-4:]) {
 			zs[i].Invalid++
 		}
 
@@ -268,9 +272,9 @@ func dumpErdle(i int, r *bytes.Reader) error {
 	var mode string
 	rest := int(size) - (16 + 24) //16(VMU header length) + 24(HRD common header length)
 	if origin == source {
-		mode = "realtime"
+		mode = "rt"
 	} else {
-		mode = "playback"
+		mode = "pb"
 	}
 	var upi string
 	switch channel {
@@ -301,13 +305,13 @@ func dumpErdle(i int, r *bytes.Reader) error {
 		return ErrLength
 	}
 
-	const row = "%7d | %8d || %02x | %8d | %s || %s | %02x | %8d | %s | %s || %08x | %08x | %4s || %x"
+	const row = "%7d | %8d || %02x | %8d | %s || %s | %02x | %8d | %s | %s || %08x | %s || %x"
 	valid := "ok"
 	if cksum != sum {
 		err = ErrInvalid
 		valid = "bad"
 	}
-	log.Printf(row, i, size, channel, sequence, vt, mode, origin, counter, at, upi, cksum, sum, valid, md.Sum(nil))
+	log.Printf(row, i, size, channel, sequence, vt, mode, origin, counter, at, upi, sum, valid, md.Sum(nil))
 	return err
 }
 
