@@ -14,6 +14,12 @@ func SumHRDL() hash.Hash32 {
 	return &v
 }
 
+func SumHRD(bs []byte) uint32 {
+	var h hrdlSum
+	h.Write(bs)
+	return h.Sum32()
+}
+
 func (h *hrdlSum) Size() int      { return 4 }
 func (h *hrdlSum) BlockSize() int { return 32 }
 func (h *hrdlSum) Reset()         { h.sum = 0 }
