@@ -5,10 +5,17 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash"
+	"hash/adler32"
 	"io"
 	"os"
 	"sort"
 )
+
+var zh uint32
+
+func init() {
+	zh = adler32.Checksum(make([]byte, 1008))
+}
 
 type MissingCaduError struct {
 	From, To uint32
@@ -160,14 +167,27 @@ func (r *hrdlReader) Read(bs []byte) (int, error) {
 	case nil:
 		r.rest = rest
 
-		// z := binary.LittleEndian.Uint32(buffer[4:]) + 12
-		// switch x, z := len(buffer), int(z); {
-		// default:
-		// case x > z:
-		// 	buffer = buffer[:z]
-		// case x < z:
-		// }
-		return copy(bs, buffer), err
+		z := int(binary.LittleEndian.Uint32(buffer[4:])) + 12
+		n := len(buffer)
+		if d := n - z; d > 0 && d%1008 == 0 {
+			n -= d
+			buffer = buffer[:n]
+		}
+		if n > z {
+			var nn, offset int
+			for {
+				if ix := bytes.Index(buffer[offset:], Stuff); ix < 0 {
+					break
+				} else {
+					nn += copy(bs[nn:], buffer[offset:offset+ix+3])
+					offset += ix + len(Stuff)
+				}
+			}
+			nn += copy(bs[nn:], buffer[offset:])
+			return nn, err
+		} else {
+			return copy(bs, buffer), err
+		}
 	case ErrSkip:
 		return r.Read(bs)
 	default:
@@ -190,6 +210,9 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 		if err != nil {
 			return nil, nil, err
 		}
+		// if s := adler32.Checksum(block); s == zh {
+		// 	continue
+		// }
 		buffer = append(buffer, block[:n]...)
 		if bytes.Equal(buffer[:WordLen], Word) {
 			break
@@ -208,6 +231,9 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 		if err != nil {
 			return nil, nil, err
 		}
+		// if s := adler32.Checksum(block); s == zh {
+		// 	continue
+		// }
 		buffer = append(buffer, block[:n]...)
 		if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {
 			buffer, rest = buffer[:offset+ix], buffer[offset+ix:]

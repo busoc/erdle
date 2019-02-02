@@ -162,17 +162,14 @@ func countHRDL(r io.Reader, by string) error {
 			}
 			return err
 		}
-		size := int(binary.LittleEndian.Uint32(body[4:])) + 12
-		xs := bytes.Replace(body[:n], Stuff, Word[:3], -1)
 
-		i, s := byFunc(xs[8:])
+		i, s := byFunc(body[8:])
 		if _, ok := zs[i]; !ok {
 			zs[i] = &coze{}
 		}
-		xs = xs[:size]
-		if z := binary.LittleEndian.Uint32(xs[4:]); int(z) != size-12 {
+		if z := binary.LittleEndian.Uint32(body[4:]) + 12; int(z) != n {
 			zs[i].Invalid++
-		} else if s := SumHRD(xs[8:len(xs)-4]); s != binary.LittleEndian.Uint32(xs[len(xs)-4:]) {
+		} else if s := SumHRD(body[8 : n-4]); s != binary.LittleEndian.Uint32(body[n-4:]) {
 			zs[i].Invalid++
 		}
 
@@ -211,8 +208,7 @@ func listHRDL(r io.Reader, raw bool) error {
 		if raw {
 			log.Printf("%6d | %x | %x | %x", i, body[:8], body[8:24], body[24:48])
 		} else {
-			x := bytes.Replace(body[:n], Stuff, Word[:3], -1)
-			if err := dumpErdle(i, bytes.NewReader(x)); err != nil {
+			if err := dumpErdle(i, bytes.NewReader(body[:n])); err != nil {
 				if err == ErrInvalid {
 					errInvalid++
 				} else if err == ErrLength {

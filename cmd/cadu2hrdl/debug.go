@@ -18,17 +18,22 @@ import (
 
 func indexPackets(r io.Reader) error {
 	body := make([]byte, 1024)
+	sum := adler32.Checksum(body)
 
 	var (
-		buffer []byte
-		pid    int
+		buffer  []byte
+		pid     int
 		elapsed time.Duration
 	)
-	step := time.Second/4096
-	for {
+	step := time.Second / 4096
+	for j := 1; ; j++ {
 		_, err := r.Read(body)
 		if err == io.EOF {
 			break
+		}
+		if s := adler32.Checksum(body); s == sum {
+			buffer = buffer[:0]
+			continue
 		}
 		var missing int
 		if err != nil {
@@ -49,23 +54,23 @@ func indexPackets(r io.Reader) error {
 				break
 			} else {
 				cut := offset + ix + WordLen
-				if len(buffer[cut:]) >= WordLen + VMULen {
+				if len(buffer[cut:]) >= WordLen+VMULen {
 					pid++
 					size := uint64(binary.LittleEndian.Uint32(buffer[cut:]))
 					v := struct {
-						Channel uint8
-						Source  uint8
+						Channel  uint8
+						Source   uint8
 						Spare1   uint16
 						Sequence uint32
 						Coarse   uint32
 						Fine     uint16
-						Spare2    uint16
+						Spare2   uint16
 					}{}
 					if err := binary.Read(bytes.NewReader(buffer[cut+WordLen:]), binary.LittleEndian, &v); err != nil {
 						return err
 					}
 					when := joinTime6(v.Coarse, v.Fine).Format("2006-01-02 15:04:05.000")
-					log.Printf("%9d || %16s | %9d | %9d || %2d | %8d | %02x | %8d | %s", pid, elapsed, cid, missing, i, size, v.Channel, v.Sequence, when)
+					log.Printf("%9d || %16s | %9d | %9d | %9d || %8d | %02x | %8d | %s", pid, elapsed, j, cid, missing, size, v.Channel, v.Sequence, when)
 
 					offset = cut + WordLen + VMULen
 				} else {
