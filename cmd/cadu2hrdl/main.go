@@ -35,7 +35,10 @@ var (
 	Magic = []byte{0x1a, 0xcf, 0xfc, 0x1d}
 )
 
-const WordLen = 4
+const (
+	WordLen = 4
+	VMULen  = 16
+)
 
 const VCDUSize = 1024
 
@@ -234,11 +237,59 @@ func runIndex(cmd *cli.Command, args []string) error {
 	}
 	r := VCDUReader(mr, *count)
 	body := make([]byte, 1024)
+
+	var (
+		buffer []byte
+		pid    int
+	)
 	for {
 		_, err := r.Read(body)
-		if err != nil {
-			return err
+		if err == io.EOF {
+			break
 		}
+		var missing int
+		if err != nil {
+			if n, ok := IsMissingCadu(err); ok {
+				missing = n
+			} else if IsCRCError(err) {
+
+			} else {
+				return err
+			}
+		}
+		cid := binary.BigEndian.Uint32(body[6:]) >> 8
+		buffer = append(buffer, body[14:1022]...)
+		var offset int
+		for i := 1; offset < len(buffer); i++ {
+			if ix := bytes.Index(buffer[offset:], Word); ix < 0 {
+				break
+			} else {
+				cut := offset + ix + WordLen
+				if len(buffer[cut:]) >= WordLen + VMULen {
+					pid++
+					size := uint64(binary.LittleEndian.Uint32(buffer[cut:]))
+					v := struct {
+						Channel uint8
+						Source  uint8
+						Spare1   uint16
+						Sequence uint32
+						Coarse   uint32
+						Fine     uint16
+						Spare2    uint16
+					}{}
+					if err := binary.Read(bytes.NewReader(buffer[cut+WordLen:]), binary.LittleEndian, &v); err != nil {
+						return err
+					}
+					when := joinTime6(v.Coarse, v.Fine).Format("2006-01-02 15:04:05.000")
+					log.Printf("%9d || %9d | %9d || %2d | %8d | %02x | %8d | %s", pid, cid, missing, i, size, v.Channel, v.Sequence, when)
+
+					offset = cut + WordLen + VMULen
+				} else {
+					break
+				}
+			}
+		}
+		buffer = buffer[offset:]
 	}
 	return nil
 }

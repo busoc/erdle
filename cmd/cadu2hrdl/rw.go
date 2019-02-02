@@ -217,3 +217,11 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 	}
 	return buffer, rest, nil
 }
+
+func StuffBytes(bs []byte) []byte {
+	return bs
+}
+
+func UnstuffBytes(bs []byte) []byte {
+	return bs
+}
