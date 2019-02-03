@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"text/template"
 	"time"
 
@@ -381,6 +380,7 @@ func runInspect(cmd *cli.Command, args []string) error {
 
 func runRelay(cmd *cli.Command, args []string) error {
 	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
+	b := cmd.Flag.Int("b", 64<<20, "buffer size between socket and assembler")
 	c := cmd.Flag.Int("c", 8, "number of connections to remote server")
 	i := cmd.Flag.Int("i", -1, "hadock instance used")
 	r := cmd.Flag.Int("r", 0, "bandwidth rate")
@@ -393,7 +393,7 @@ func runRelay(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	queue, err := reassemble(cmd.Flag.Arg(0), *x, *q)
+	queue, err := reassemble(cmd.Flag.Arg(0), *x, *q, *b)
 	if err != nil {
 		return err
 	}
@@ -528,6 +528,7 @@ func runList(cmd *cli.Command, args []string) error {
 
 func runStore(cmd *cli.Command, args []string) error {
 	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
+	b := cmd.Flag.Int("b", 64<<20, "buffer size")
 	k := cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
@@ -536,7 +537,7 @@ func runStore(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	queue, err := reassemble(cmd.Flag.Arg(0), "", *q)
+	queue, err := reassemble(cmd.Flag.Arg(0), "", *q, *b)
 	if err != nil {
 		return err
 	}
@@ -568,11 +569,12 @@ func runStore(cmd *cli.Command, args []string) error {
 func runDump(cmd *cli.Command, args []string) error {
 	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
 	i := cmd.Flag.Int("i", -1, "hadock instance used")
+	b := cmd.Flag.Int("b", 64<<20, "buffer size")
 	k := cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	queue, err := reassemble(cmd.Flag.Arg(0), "", *q)
+	queue, err := reassemble(cmd.Flag.Arg(0), "", *q, *b)
 	if err != nil {
 		return err
 	}
@@ -615,13 +617,13 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 		for range tick {
 			valid := count - errLength - errSum
 			if count > 0 || dropped > 0 {
-				logger.Printf(row, atomic.LoadInt64(&count), atomic.LoadInt64(&dropped), atomic.LoadInt64(&size)>>10, atomic.LoadInt64(&valid), atomic.LoadInt64(&errLength), atomic.LoadInt64(&errSum))
+				logger.Printf(row, count, dropped, size>>10, valid, errLength, errSum)
 
-				atomic.StoreInt64(&count, 0)
-				atomic.StoreInt64(&dropped, 0)
-				atomic.StoreInt64(&errLength, 0)
-				atomic.StoreInt64(&errSum, 0)
-				atomic.StoreInt64(&size, 0)
+				count = 0
+				dropped = 0
+				errLength = 0
+				errSum = 0
+				size = 0
 			}
 		}
 	}()
@@ -630,16 +632,9 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 		defer close(q)
 
 		for bs := range queue {
-			atomic.AddInt64(&size, int64(len(bs)))
+			size += int64(len(bs))
 			z := int(binary.LittleEndian.Uint32(bs[4:])) + 12
-			// switch {
-			// default:
-			// case z < len(bs):
-			// 	bs = bs[:z]
-			// case z > len(bs):
-			// 	atomic.AddInt64(&errLength, 1)
-			// 	continue
-			// }
+
 			bs = bytes.Replace(bs, Stuff, Word[:3], -1)
 			if keep {
 				sum := binary.LittleEndian.Uint32(bs[z-4:])
@@ -648,23 +643,22 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 					chk += uint32(bs[i])
 				}
 				if chk != sum {
-					atomic.AddInt64(&errSum, 1)
-					// fmt.Printf("bad: want: %08x - got: %08x\n", sum, chk)
+					errSum++
 					continue
 				}
 			}
 			select {
 			case q <- bs[8:z]: //bytes.Replace(bs[8:], Stuff, Word[:3], -1):
-				atomic.AddInt64(&count, 1)
+				count++
 			default:
-				atomic.AddInt64(&dropped, 1)
+				dropped++
 			}
 		}
 	}()
 	return q
 }
 
-func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
+func reassemble(addr, proxy string, n, b int) (<-chan []byte, error) {
 	a, err := net.ResolveUDPAddr(protoFromAddr(addr))
 	if err != nil {
 		return nil, err
@@ -678,10 +672,14 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 	}
 	q := make(chan []byte, n)
 
-	rg := ringbuffer.NewRingSize(64<<20, 0)
-	go func() {
-		io.CopyBuffer(rg, c, make([]byte, 1024))
-	}()
+	var rg io.Reader = c
+	if b > 0 {
+		rw := ringbuffer.NewRingSize(b, 0)
+		go func(r io.Reader) {
+			io.CopyBuffer(rw, r, make([]byte, 1024))
+		}(rg)
+		rg = rw
+	}
 
 	var r io.Reader = rg
 	switch x, err := net.Dial(protoFromAddr(proxy)); {
@@ -700,14 +698,14 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 		tick := time.Tick(5 * time.Second)
 		for range tick {
 			if count > 0 || skipped > 0 {
-				logger.Printf(row, atomic.LoadInt64(&count), atomic.LoadInt64(&skipped), atomic.LoadInt64(&dropped), atomic.LoadInt64(&errMissing), atomic.LoadInt64(&errCRC), atomic.LoadInt64(&size))
+				logger.Printf(row, count, skipped, dropped, errMissing, errCRC, size)
 
-				atomic.StoreInt64(&size, 0)
-				atomic.StoreInt64(&skipped, 0)
-				atomic.StoreInt64(&errMissing, 0)
-				atomic.StoreInt64(&errCRC, 0)
-				atomic.StoreInt64(&dropped, 0)
-				atomic.StoreInt64(&count, 0)
+				size = 0
+				skipped = 0
+				errMissing = 0
+				errCRC = 0
+				dropped = 0
+				count = 0
 			}
 		}
 	}()
@@ -727,19 +725,19 @@ func reassemble(addr, proxy string, n int) (<-chan []byte, error) {
 				}
 				select {
 				case q <- buffer:
-					atomic.AddInt64(&count, 1)
+					count++
 				default:
-					atomic.AddInt64(&dropped, 1)
-					atomic.AddInt64(&size, int64(len(buffer)))
+					dropped += 1
+					size += int64(len(buffer))
 				}
 			} else if n, ok := IsMissingCadu(err); ok {
-				atomic.AddInt64(&errMissing, int64(n))
-				atomic.AddInt64(&skipped, 1)
-				atomic.AddInt64(&size, int64(len(buffer)))
+				errMissing += int64(n)
+				size += int64(len(buffer))
+				skipped++
 			} else if IsCRCError(err) {
-				atomic.AddInt64(&errCRC, 1)
-				atomic.AddInt64(&skipped, 1)
-				atomic.AddInt64(&size, int64(len(buffer)))
+				errCRC += int64(n)
+				size += int64(len(buffer))
+				skipped++
 			} else {
 				log.Println(err)
 				return
