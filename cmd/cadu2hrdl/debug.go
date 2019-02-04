@@ -64,6 +64,7 @@ func indexPackets(r io.Reader, by string) error {
 	var (
 		buffer  []byte
 		pid     int
+		missing int
 		elapsed time.Duration
 	)
 	step := time.Second / 4096
@@ -72,11 +73,6 @@ func indexPackets(r io.Reader, by string) error {
 		if err == io.EOF {
 			break
 		}
-		if s := adler32.Checksum(body); s == sum {
-			buffer = buffer[:0]
-			continue
-		}
-		var missing int
 		if err != nil {
 			if n, ok := IsMissingCadu(err); ok {
 				missing = n
@@ -85,6 +81,10 @@ func indexPackets(r io.Reader, by string) error {
 			} else {
 				return err
 			}
+		}
+		if s := adler32.Checksum(body); s == sum {
+			buffer = buffer[:0]
+			continue
 		}
 		elapsed += step
 		cid := binary.BigEndian.Uint32(body[6:]) >> 8
@@ -104,6 +104,7 @@ func indexPackets(r io.Reader, by string) error {
 					log.Printf("%9d || %16s | %9d | %9d | %9d || %8d | %02x | %8d | %s", pid, elapsed, j, cid, missing, size, id, seq, when)
 
 					offset = cut + WordLen + VMULen
+					missing = 0
 				} else {
 					break
 				}
