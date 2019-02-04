@@ -176,7 +176,7 @@ func (r *hrdlReader) Read(bs []byte) (int, error) {
 }
 
 func StuffBytes(bs []byte) []byte {
-	offset := WordLen*2
+	offset := WordLen * 2
 
 	xs := make([]byte, 0, len(bs))
 	xs = append(xs, bs[:offset]...)
@@ -199,7 +199,7 @@ func Unstuff(bs []byte) (int, []byte) {
 }
 
 func UnstuffBytes(src, dst []byte) int {
-	z, n := int(binary.LittleEndian.Uint32(src[4:])) + 12, len(src)
+	z, n := int(binary.LittleEndian.Uint32(src[4:]))+12, len(src)
 	if d := n - z; d > 0 && d%1008 == 0 {
 		n -= d
 		src = src[:n]

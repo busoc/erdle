@@ -88,7 +88,7 @@ func splitTime5(t time.Time) (uint32, uint8) {
 	t = t.UTC().Add(-deltaGPS)
 
 	ms := t.Nanosecond() / int(time.Millisecond)
-	c := math.Ceil(float64(ms)/1000 * 256)
+	c := math.Ceil(float64(ms) / 1000 * 256)
 	return uint32(t.Unix()), uint8(c)
 }
 

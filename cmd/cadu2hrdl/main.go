@@ -37,6 +37,7 @@ var (
 const (
 	WordLen = 4
 	VMULen  = 16
+	HDRLen  = 24
 )
 
 const VCDUSize = 1024
@@ -228,6 +229,7 @@ func main() {
 
 func runIndex(cmd *cli.Command, args []string) error {
 	count := cmd.Flag.Int("c", 0, "skip count bytes")
+	by := cmd.Flag.String("b", "", "")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
@@ -235,7 +237,7 @@ func runIndex(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return indexPackets(VCDUReader(mr, *count))
+	return indexPackets(VCDUReader(mr, *count), *by)
 }
 
 func runSplit(cmd *cli.Command, args []string) error {
@@ -540,7 +542,7 @@ func runStore(cmd *cli.Command, args []string) error {
 		fail  int
 	)
 	go func() {
-		tick := time.Tick(time.Second*5)
+		tick := time.Tick(time.Second * 5)
 		logger := log.New(os.Stderr, "[hrdp] ", 0)
 		for range tick {
 			if count > 0 || fail > 0 {
@@ -608,7 +610,7 @@ func validate(queue <-chan []byte, n int, keep, strip bool) <-chan []byte {
 		const row = "%6d packets, %4d dropped, %6dKB, %4d valid, %4d length error, %4d checksum error"
 		logger := log.New(os.Stderr, "[validate] ", 0)
 
-		tick := time.Tick(time.Second*5)
+		tick := time.Tick(time.Second * 5)
 		for range tick {
 			valid := count - errLength - errSum
 			if count > 0 || dropped > 0 {
@@ -628,7 +630,7 @@ func validate(queue <-chan []byte, n int, keep, strip bool) <-chan []byte {
 
 		var offset int
 		if strip {
-			offset = 2*WordLen
+			offset = 2 * WordLen
 		}
 		for bs := range queue {
 			n, xs := Unstuff(bs)

@@ -16,7 +16,26 @@ import (
 	"github.com/midbel/ringbuffer"
 )
 
-func indexPackets(r io.Reader) error {
+func indexPackets(r io.Reader, by string) error {
+	var byFunc func(bs []byte) (byte, uint32, time.Time)
+
+	hrdlLen := WordLen + VMULen
+	switch by {
+	case "origin":
+		byFunc = func(bs []byte) (byte, uint32, time.Time) {
+			e := binary.LittleEndian.Uint64(bs[23:])
+			return bs[39], binary.LittleEndian.Uint32(bs[19:]), gpsEpoch.Add(time.Duration(e))
+		}
+		hdrLen += HDRLen
+	case "channel", "":
+		byFunc = func(bs []byte) (byte, uint32, time.Time) {
+			coarse := binary.LittleEndian.Uint32(bs[8:])
+			fine := binary.LittleEndian.Uint16(bs[12:])
+			return bs[0], binary.LittleEndian.Uint32(bs[4:]), joinTime6(coarse, fine)
+		}
+	default:
+		return fmt.Errorf("unrecognized value %s", by)
+	}
 	body := make([]byte, 1024)
 	sum := adler32.Checksum(body)
 
@@ -54,23 +73,13 @@ func indexPackets(r io.Reader) error {
 				break
 			} else {
 				cut := offset + ix + WordLen
-				if len(buffer[cut:]) >= WordLen+VMULen {
+				if len(buffer[cut:]) >= hdrLen {
 					pid++
 					size := uint64(binary.LittleEndian.Uint32(buffer[cut:]))
-					v := struct {
-						Channel  uint8
-						Source   uint8
-						Spare1   uint16
-						Sequence uint32
-						Coarse   uint32
-						Fine     uint16
-						Spare2   uint16
-					}{}
-					if err := binary.Read(bytes.NewReader(buffer[cut+WordLen:]), binary.LittleEndian, &v); err != nil {
-						return err
-					}
-					when := joinTime6(v.Coarse, v.Fine).Format("2006-01-02 15:04:05.000")
-					log.Printf("%9d || %16s | %9d | %9d | %9d || %8d | %02x | %8d | %s", pid, elapsed, j, cid, missing, size, v.Channel, v.Sequence, when)
+
+					id, seq, w := byFunc(buffer[cut+WordLen:])
+					when := w.Format("2006-01-02 15:04:05.000")
+					log.Printf("%9d || %16s | %9d | %9d | %9d || %8d | %02x | %8d | %s", pid, elapsed, j, cid, missing, size, id, seq, when)
 
 					offset = cut + WordLen + VMULen
 				} else {
