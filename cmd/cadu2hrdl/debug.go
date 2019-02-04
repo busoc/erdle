@@ -16,22 +16,44 @@ import (
 	"github.com/midbel/ringbuffer"
 )
 
+func byChannel(bs []byte) (byte, uint32) {
+	return bs[0], binary.LittleEndian.Uint32(bs[4:])
+}
+
+func byOrigin(bs []byte) (byte, uint32) {
+	return bs[39], binary.LittleEndian.Uint32(bs[19:])
+}
+
 func indexPackets(r io.Reader, by string) error {
 	var byFunc func(bs []byte) (byte, uint32, time.Time)
 
-	hrdlLen := WordLen + VMULen
+	hdrLen := WordLen + VMULen
 	switch by {
-	case "origin":
+	case "mix":
 		byFunc = func(bs []byte) (byte, uint32, time.Time) {
+			id, seq := byOrigin(bs)
+
+			coarse := binary.LittleEndian.Uint32(bs[8:])
+			fine := binary.LittleEndian.Uint16(bs[12:])
+
+			return id, seq, joinTime6(coarse, fine)
+		}
+		hdrLen += HDRLen
+	case "origin", "source":
+		byFunc = func(bs []byte) (byte, uint32, time.Time) {
+			id, seq := byOrigin(bs)
 			e := binary.LittleEndian.Uint64(bs[23:])
-			return bs[39], binary.LittleEndian.Uint32(bs[19:]), gpsEpoch.Add(time.Duration(e))
+			return id, seq, gpsEpoch.Add(time.Duration(e))
 		}
 		hdrLen += HDRLen
 	case "channel", "":
 		byFunc = func(bs []byte) (byte, uint32, time.Time) {
+			id, seq := byChannel(bs)
+
 			coarse := binary.LittleEndian.Uint32(bs[8:])
 			fine := binary.LittleEndian.Uint16(bs[12:])
-			return bs[0], binary.LittleEndian.Uint32(bs[4:]), joinTime6(coarse, fine)
+
+			return id, seq, joinTime6(coarse, fine)
 		}
 	default:
 		return fmt.Errorf("unrecognized value %s", by)

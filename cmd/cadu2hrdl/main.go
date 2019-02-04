@@ -173,9 +173,15 @@ options:
 		Run:   runSplit,
 	},
 	{
-		Usage: "index [-c] <file...>",
+		Usage: "index [-c skip] [-b by] <file...>",
 		Short: "create an index of hrdl packets by cadus",
 		Run:   runIndex,
+		Desc: `
+options:
+
+  -c COUNT  skip COUNT bytes between each packets
+  -b BY     report by origin or by channel
+`,
 	},
 }
 
@@ -237,7 +243,7 @@ func runIndex(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return indexPackets(VCDUReader(mr, *count), *by)
+	return indexPackets(VCDUReader(mr, *count), strings.ToLower(*by))
 }
 
 func runSplit(cmd *cli.Command, args []string) error {

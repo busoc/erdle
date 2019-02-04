@@ -61,14 +61,10 @@ func countCadus(r io.Reader) error {
 func countHRDL(r io.Reader, by string) error {
 	var byFunc func(bs []byte) (byte, uint32)
 	switch by {
-	case "origin":
-		byFunc = func(bs []byte) (byte, uint32) {
-			return bs[39], binary.LittleEndian.Uint32(bs[19:])
-		}
+	case "origin", "source":
+		byFunc = byOrigin
 	case "channel", "":
-		byFunc = func(bs []byte) (byte, uint32) {
-			return bs[0], binary.LittleEndian.Uint32(bs[4:])
-		}
+		byFunc = byChannel
 	default:
 		return fmt.Errorf("unrecognized value %s", by)
 	}
