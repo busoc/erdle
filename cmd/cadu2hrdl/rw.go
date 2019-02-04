@@ -233,9 +233,6 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		// if s := adler32.Checksum(block); s == zh {
-		// 	continue
-		// }
 		buffer = append(buffer, block[:n]...)
 		if bytes.Equal(buffer[:WordLen], Word) {
 			break
@@ -254,9 +251,6 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		// if s := adler32.Checksum(block); s == zh {
-		// 	continue
-		// }
 		buffer = append(buffer, block[:n]...)
 		if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {
 			buffer, rest = buffer[:offset+ix], buffer[offset+ix:]

@@ -2,10 +2,9 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"fmt"
-	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -31,7 +30,7 @@ func NewHRDP(dir string) (*hrdp, error) {
 		tick:    time.Tick(time.Minute * 5),
 	}
 
-	hr.file, err = createHRDPFile(dir, time.Now())
+	hr.file, err = createHRDPFile(dir, time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -53,27 +52,44 @@ func (h *hrdp) Write(bs []byte) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		h.file, err = createHRDPFile(h.datadir, t)
+		h.file, err = createHRDPFile(h.datadir, t.UTC())
 		h.writer.Reset(h.file)
 	default:
 	}
-	n, c := time.Now().Unix(), bs[8]
 
-	var buf bytes.Buffer
-	binary.Write(&buf, binary.LittleEndian, uint32(len(bs)+14))
-	binary.Write(&buf, binary.BigEndian, uint16(0))
-	binary.Write(&buf, binary.BigEndian, h.payload)
-	binary.Write(&buf, binary.BigEndian, uint8(c))
-	binary.Write(&buf, binary.BigEndian, uint32(n))
-	binary.Write(&buf, binary.BigEndian, uint8(0))
-	binary.Write(&buf, binary.BigEndian, uint32(n))
-	binary.Write(&buf, binary.BigEndian, uint8(0))
-	buf.Write(bs)
+	var (
+		f uint32
+		c uint8
+	)
 
-	if _, err := io.Copy(h.writer, &buf); err != nil {
+	binary.Write(h.writer, binary.LittleEndian, uint32(len(bs)+14))
+	binary.Write(h.writer, binary.BigEndian, uint16(0))
+	binary.Write(h.writer, binary.BigEndian, h.payload)
+	binary.Write(h.writer, binary.BigEndian, bs[8])
+	// set acquisition timestamp
+	coarse := binary.LittleEndian.Uint32(bs[16:])
+	fine := binary.LittleEndian.Uint16(bs[20:])
+	f, c = splitTime5(joinTime6(coarse, fine))
+
+	binary.Write(h.writer, binary.BigEndian, f)
+	binary.Write(h.writer, binary.BigEndian, c)
+	//set reception timestamp
+	f, c = splitTime5(time.Now())
+	binary.Write(h.writer, binary.BigEndian, f)
+	binary.Write(h.writer, binary.BigEndian, c)
+
+	if _, err := h.writer.Write(bs); err != nil {
 		return 0, err
 	}
 	return len(bs), nil
+}
+
+func splitTime5(t time.Time) (uint32, uint8) {
+	t = t.UTC().Add(-deltaGPS)
+
+	ms := t.Nanosecond() / int(time.Millisecond)
+	c := math.Ceil(float64(ms)/1000 * 256)
+	return uint32(t.Unix()), uint8(c)
 }
 
 func createHRDPFile(dir string, t time.Time) (*os.File, error) {

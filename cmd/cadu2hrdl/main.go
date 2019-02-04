@@ -104,8 +104,9 @@ options:
 		Desc: `
 options:
 
-  -q SIZE  size of the queue to store reassemble packets
-  -k       store HRDL packets even if they are corrupted
+  -b BUFFER  size of buffer between incoming cadus and reassembler
+  -q SIZE    size of the queue to store reassemble packets
+  -k         store HRDL packets even if they are corrupted
 `,
 	},
 	{
@@ -180,8 +181,8 @@ options:
 const Program = "c2h"
 
 func init() {
-	cli.BuildTime = "2019-01-15 11:30:00"
-	cli.Version = "0.0.1"
+	cli.BuildTime = "2019-02-04 12:45:00"
+	cli.Version = "0.1.1"
 }
 
 const helpText = `
@@ -399,7 +400,7 @@ func runRelay(cmd *cli.Command, args []string) error {
 	}
 
 	var gp errgroup.Group
-	for bs := range validate(queue, *q, *k) {
+	for bs := range validate(queue, *q, *k, true) {
 		xs := bs
 		gp.Go(func() error {
 			_, err := p.Write(xs)
@@ -533,26 +534,28 @@ func runStore(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	tick := time.Tick(time.Second)
 	var (
 		count int
 		size  int
 		fail  int
 	)
-	logger := log.New(os.Stderr, "[hrdp] ", 0)
-	for bs := range validate(queue, *q, *k) {
+	go func() {
+		tick := time.Tick(time.Second*5)
+		logger := log.New(os.Stderr, "[hrdp] ", 0)
+		for range tick {
+			if count > 0 || fail > 0 {
+				logger.Printf("%s: %6d packets, %7dKB, %6d failures", hr.Filename(), count, size>>10, fail)
+				count, size, fail = 0, 0, 0
+			}
+		}
+	}()
+	for bs := range validate(queue, *q, *k, false) {
 		if n, err := hr.Write(bs); err != nil {
 			fail++
 			log.Println(err)
 		} else {
 			count++
 			size += n
-		}
-		select {
-		case <-tick:
-			logger.Printf("%6d packets (%s), %7dKB, %6d failures", count, hr.Filename(), size>>10, fail)
-			count, size, fail = 0, 0, 0
-		default:
 		}
 	}
 	return nil
@@ -570,7 +573,7 @@ func runDump(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return dumpPackets(validate(queue, *q, *k), *i)
+	return dumpPackets(validate(queue, *q, *k, true), *i)
 }
 
 func runDebug(cmd *cli.Command, args []string) error {
@@ -593,7 +596,7 @@ func runTrace(cmd *cli.Command, args []string) error {
 	return traceCadus(cmd.Flag.Arg(0))
 }
 
-func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
+func validate(queue <-chan []byte, n int, keep, strip bool) <-chan []byte {
 	var (
 		count     int64
 		size      int64
@@ -605,7 +608,7 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 		const row = "%6d packets, %4d dropped, %6dKB, %4d valid, %4d length error, %4d checksum error"
 		logger := log.New(os.Stderr, "[validate] ", 0)
 
-		tick := time.Tick(time.Second)
+		tick := time.Tick(time.Second*5)
 		for range tick {
 			valid := count - errLength - errSum
 			if count > 0 || dropped > 0 {
@@ -623,9 +626,16 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 	go func() {
 		defer close(q)
 
+		var offset int
+		if strip {
+			offset = 2*WordLen
+		}
 		for bs := range queue {
-			// bs = bytes.Replace(bs, Stuff, Word[:3], -1)
-			_, xs := Unstuff(bs)
+			n, xs := Unstuff(bs)
+			if n < offset {
+				dropped++
+				continue
+			}
 			z := int(binary.LittleEndian.Uint32(xs[4:])) + 12
 			size += int64(z)
 			if keep {
@@ -640,7 +650,7 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 				}
 			}
 			select {
-			case q <- xs[8:z]: //bytes.Replace(bs[8:], Stuff, Word[:3], -1):
+			case q <- xs[offset:z]:
 				count++
 			default:
 				dropped++
