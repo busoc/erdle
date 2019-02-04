@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/md5"
 	"encoding/binary"
@@ -56,79 +55,6 @@ func countCadus(r io.Reader) error {
 		z.Size += n
 	}
 	log.Printf("%d cadus, missing: %d, invalid: %d (%dKB)", z.Count, z.Missing, z.Invalid, z.Size>>10)
-	return nil
-}
-
-func listCadus(r io.Reader) error {
-	body := make([]byte, 1024)
-
-	const row = "%9d | %x | %x | %x | %12d | %7d | %12d | %3d | %7d | %9dKB | %s"
-
-	var (
-		count  uint64
-		buffer []byte
-	)
-	rs := bufio.NewReader(r)
-	for i := 0; ; i++ {
-		_, err := rs.Read(body)
-		if err == io.EOF {
-			break
-		}
-		var missing int
-		if m, ok := IsMissingCadu(err); err != nil && !(ok || IsCRCError(err)) {
-			return err
-		} else {
-			missing = m
-			buffer = buffer[:0]
-		}
-		var (
-			last    uint32
-			magic   uint32
-			seq     uint32
-			control uint32
-			pid     uint16
-			valid   string
-		)
-		var (
-			hrdl uint64
-			size uint64
-		)
-		rs := bytes.NewReader(body)
-		binary.Read(rs, binary.BigEndian, &magic)
-		binary.Read(rs, binary.BigEndian, &pid)
-		binary.Read(rs, binary.BigEndian, &seq)
-		binary.Read(rs, binary.BigEndian, &control)
-
-		buffer = append(buffer, body[14:1022]...)
-		var offset int
-		for offset < len(buffer) {
-			if ix := bytes.Index(buffer[offset:], Word); ix < 0 {
-				break
-			} else {
-				cut := offset + ix + WordLen
-				if len(buffer[cut:]) >= WordLen {
-					hrdl++
-					size += uint64(binary.LittleEndian.Uint32(buffer[cut:]))
-					offset = cut + WordLen
-				} else {
-					break
-				}
-			}
-		}
-		buffer = buffer[offset:]
-		count += hrdl
-
-		if err != nil {
-			valid = err.Error()
-		} else {
-			valid = "-"
-		}
-
-		log.Printf(row, i, magic, pid, control, seq>>8, (seq>>8)-(last>>8), missing, hrdl, count, size>>10, valid)
-		if hrdl > 0 {
-			last = seq
-		}
-	}
 	return nil
 }
 
