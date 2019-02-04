@@ -57,15 +57,14 @@ func protoFromAddr(a string) (string, string) {
 
 var commands = []*cli.Command{
 	{
-		Usage: "list [-pcap] [-x filter] [-t type] [-c skip] [-k keep] <file...>",
-		Short: "list cadus/HRDL packets contained in the given files",
+		Usage: "list [-pcap] [-x filter] [-c skip] [-k keep] <file...>",
+		Short: "list HRDL packets contained in the given file(s)",
 		Run:   runList,
 		Desc: `
 options:
 
   -c COUNT   skip COUNT bytes between each packets
   -x FILTER  specify a predicate to filter packets from a capture file
-  -t TYPE    specify the packet type (hrdl or cadu)
   -k         keep invalid HRDL packets
   -pcap      tell replay that the given files is a pcap file
 `,
@@ -110,18 +109,19 @@ options:
 `,
 	},
 	{
-		Usage: "relay [-r rate] [-q queue] [-i instance] [-c conn] [-k keep] [-x proxy] <host:port> <host:port>",
+		Usage: "relay [-b buffer] [-r rate] [-q queue] [-i instance] [-c conn] [-k keep] [-x proxy] <host:port> <host:port>",
 		Short: "reassemble incoming cadus to HRDL packets",
 		Run:   runRelay,
 		Desc: `
 options:
 
+  -b BUFFER    size of buffer between incoming cadus and reassembler
   -q SIZE      size of the queue to store reassembled HRDL packets
   -i INSTANCE  hadock instance
   -r RATE      outgoing bandwidth rate
   -c CONN      number of connections to open to remote host
   -x PROXY     host:port of a remote host
-  -k           keep invalid HRDL packets
+  -k           don't relay invalid HRDL packets
 `,
 	},
 	{
@@ -316,7 +316,7 @@ func (c *chunker) Read(bs []byte) (int, error) {
 			}
 			return 0, err
 		}
-		c.buffer.Write(c.scanner.Bytes())
+		c.buffer.Write(StuffBytes(c.scanner.Bytes()))
 	}
 	var b bytes.Buffer
 	b.Write(Magic)
@@ -497,7 +497,6 @@ func runCount(cmd *cli.Command, args []string) error {
 func runList(cmd *cli.Command, args []string) error {
 	pcap := cmd.Flag.Bool("pcap", false, "")
 	filter := cmd.Flag.String("x", "", "pcap filter")
-	kind := cmd.Flag.String("t", "", "packet type")
 	keep := cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
 	count := cmd.Flag.Int("c", 0, "bytes to skip before each packets")
 	if err := cmd.Flag.Parse(args); err != nil {
@@ -516,14 +515,7 @@ func runList(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	switch strings.ToLower(*kind) {
-	case "", "hrdl":
-		return listHRDL(HRDLReader(r, *count), *keep)
-	case "cadu", "vcdu":
-		return listCadus(VCDUReader(r, *count))
-	default:
-		return fmt.Errorf("unknown packet type %s", *kind)
-	}
+	return listHRDL(HRDLReader(r, *count), *keep)
 }
 
 func runStore(cmd *cli.Command, args []string) error {
@@ -632,15 +624,15 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 		defer close(q)
 
 		for bs := range queue {
-			size += int64(len(bs))
-			z := int(binary.LittleEndian.Uint32(bs[4:])) + 12
-
-			bs = bytes.Replace(bs, Stuff, Word[:3], -1)
+			// bs = bytes.Replace(bs, Stuff, Word[:3], -1)
+			_, xs := Unstuff(bs)
+			z := int(binary.LittleEndian.Uint32(xs[4:])) + 12
+			size += int64(z)
 			if keep {
-				sum := binary.LittleEndian.Uint32(bs[z-4:])
+				sum := binary.LittleEndian.Uint32(xs[z-4:])
 				var chk uint32
 				for i := 8; i < z-4; i++ {
-					chk += uint32(bs[i])
+					chk += uint32(xs[i])
 				}
 				if chk != sum {
 					errSum++
@@ -648,7 +640,7 @@ func validate(queue <-chan []byte, n int, keep bool) <-chan []byte {
 				}
 			}
 			select {
-			case q <- bs[8:z]: //bytes.Replace(bs[8:], Stuff, Word[:3], -1):
+			case q <- xs[8:z]: //bytes.Replace(bs[8:], Stuff, Word[:3], -1):
 				count++
 			default:
 				dropped++
