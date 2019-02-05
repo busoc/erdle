@@ -1,11 +1,11 @@
 package main
 
 import (
-  "bufio"
+	"bufio"
 	"encoding/binary"
 	"flag"
-  "fmt"
-  "hash"
+	"fmt"
+	"hash"
 	"hash/adler32"
 	"io"
 	"os"
@@ -23,7 +23,7 @@ func main() {
 	skip := flag.Int("s", 0, "strip N bytes before")
 	filler := flag.Bool("k", false, "keep filler")
 	repeat := flag.Int("n", 0, "repeat")
-  body := flag.Bool("b", false, "body only")
+	body := flag.Bool("b", false, "body only")
 	flag.Parse()
 
 	if flag.NArg() == 0 {
@@ -52,19 +52,19 @@ func main() {
 		if s, err := copyFile(wc, f, *skip, *filler); err != nil {
 			os.Exit(5)
 		} else {
-      fmt.Printf("%4d: %s: %d cadus (%dKB), %4d skipped\n", i+1, filepath.Base(f), s.Count, s.Size>>10, s.Skip)
-    }
+			fmt.Printf("%4d: %s: %d cadus (%dKB), %4d skipped\n", i+1, filepath.Base(f), s.Count, s.Size>>10, s.Skip)
+		}
 	}
 }
 
 type copyStat struct {
-  Count int
-  Size  int
-  Skip  int
+	Count int
+	Size  int
+	Skip  int
 }
 
 func copyFile(w io.Writer, file string, skip int, fill bool) (copyStat, error) {
-  var stat copyStat
+	var stat copyStat
 	r, err := os.Open(file)
 	if err != nil {
 		return stat, err
@@ -81,23 +81,23 @@ func copyFile(w io.Writer, file string, skip int, fill bool) (copyStat, error) {
 			return stat, err
 		}
 		if s := adler32.Checksum(body[skip+14 : skip+1022]); !fill && s == sumEmpty {
-      stat.Skip++
+			stat.Skip++
 			continue
 		}
 		if n, err := w.Write(body[skip:]); err != nil {
 			return stat, err
 		} else {
-      stat.Size += n
-      stat.Count++
-    }
+			stat.Size += n
+			stat.Count++
+		}
 	}
 	return stat, nil
 }
 
 type writer struct {
-  body bool
-	next uint32
-  inner *bufio.Writer
+	body  bool
+	next  uint32
+	inner *bufio.Writer
 	io.WriteCloser
 }
 
@@ -110,23 +110,23 @@ func NewWriter(file string, body bool) (io.WriteCloser, error) {
 }
 
 func (w *writer) Close() error {
-  if err := w.inner.Flush(); err != nil {
-    return err
-  }
-  return w.WriteCloser.Close()
+	if err := w.inner.Flush(); err != nil {
+		return err
+	}
+	return w.WriteCloser.Close()
 }
 
 func (w *writer) Write(bs []byte) (int, error) {
-  if !w.body {
-    if n := (w.next & 0xFF000000) >> 8; n > 0 {
-      w.next = 0
-    }
-    binary.BigEndian.PutUint32(bs[6:], w.next<<8)
-    binary.BigEndian.PutUint16(bs[1022:], Sum(bs[4:1022]))
-    w.next++
-  } else {
-    bs = bs[14:1022]
-  }
+	if !w.body {
+		if n := (w.next & 0xFF000000) >> 8; n > 0 {
+			w.next = 0
+		}
+		binary.BigEndian.PutUint32(bs[6:], w.next<<8)
+		binary.BigEndian.PutUint16(bs[1022:], Sum(bs[4:1022]))
+		w.next++
+	} else {
+		bs = bs[14:1022]
+	}
 	return w.inner.Write(bs)
 }
 
