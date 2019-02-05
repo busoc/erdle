@@ -3,19 +3,15 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash"
-	"hash/adler32"
 	"io"
 	"os"
 	"sort"
 )
 
-var zh uint32
-
-func init() {
-	zh = adler32.Checksum(make([]byte, 1008))
-}
+var ErrMagic = errors.New("cadu: invalid magic")
 
 type MissingCaduError struct {
 	From, To uint32
@@ -120,31 +116,49 @@ func VCDUReader(r io.Reader, skip int) io.Reader {
 	}
 }
 
+const (
+	CaduBodyLen      = 1008
+	CaduLen          = 1024
+	CaduHeaderLen    = 14
+	CaduTrailerLen   = 2
+	CaduTrailerIndex = CaduHeaderLen + CaduBodyLen
+	CaduCounterMask  = 0xFFFFFF
+)
+
 func (r *vcduReader) Read(bs []byte) (int, error) {
 	defer r.digest.Reset()
-	xs := make([]byte, r.skip+1024)
-	n, err := r.inner.Read(xs)
+	xs := make([]byte, r.skip+CaduLen)
+	// n, err := r.inner.Read(xs)
+	n, err := io.ReadFull(r.inner, xs)
 	if err != nil {
 		return n, err
 	}
 	if n == 0 {
 		return r.Read(bs)
 	}
-	if s := r.digest.Sum(xs[r.skip+4 : r.skip+1022]); !bytes.Equal(s[2:], xs[r.skip+1022:r.skip+1024]) {
-		w := binary.BigEndian.Uint16(xs[r.skip+1022:])
+	if !bytes.HasPrefix(xs[r.skip:], Magic) {
+		return 0, ErrMagic
+	}
+	if s := r.digest.Sum(xs[r.skip+4 : r.skip+CaduTrailerIndex]); !bytes.Equal(s[2:], xs[r.skip+CaduTrailerIndex:r.skip+CaduLen]) {
+		w := binary.BigEndian.Uint16(xs[r.skip+CaduTrailerIndex:])
 		g := binary.BigEndian.Uint16(s[2:])
 		err = CRCError{Want: w, Got: g}
 	}
 
 	curr := binary.BigEndian.Uint32(xs[r.skip+6:]) >> 8
-	if diff := (curr - r.counter) & 0xFFFFFF; diff != curr && diff > 1 {
+	if curr < r.counter {
+		if err == nil {
+			err = MissingCaduError{From: curr, To: r.counter}
+		}
+	}
+	if diff := (curr - r.counter) & CaduCounterMask; diff != curr && diff > 1 {
 		if err == nil {
 			err = MissingCaduError{From: r.counter, To: curr}
 		}
 	}
 	r.counter = curr
 	if r.body {
-		n = copy(bs, xs[r.skip+14:r.skip+1022])
+		n = copy(bs, xs[r.skip+CaduHeaderLen:r.skip+CaduTrailerIndex])
 	} else {
 		n = copy(bs, xs[r.skip:])
 	}
@@ -200,7 +214,7 @@ func Unstuff(bs []byte) (int, []byte) {
 
 func UnstuffBytes(src, dst []byte) int {
 	z, n := int(binary.LittleEndian.Uint32(src[4:]))+12, len(src)
-	if d := n - z; d > 0 && d%1008 == 0 {
+	if d := n - z; d > 0 && d % CaduBodyLen == 0 {
 		n -= d
 		src = src[:n]
 	}
@@ -219,18 +233,25 @@ func UnstuffBytes(src, dst []byte) int {
 }
 
 func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
-	var (
-		offset int
-		buffer []byte
-	)
+	// var (
+	// 	offset int
+	// 	buffer []byte
+	// )
 
+	buffer := make([]byte, 0, 256<<10)
 	if len(rest) > 0 {
 		buffer = append(buffer, rest...)
 	}
-	block := make([]byte, 1008)
+	block := make([]byte, CaduBodyLen)
+
+	var offset int
 	for {
 		n, err := r.Read(block)
 		if err != nil {
+			// if _, ok := IsMissingCadu(err); !(ok || IsCRCError(err)) {
+			// 	return nil, nil, err
+			// }
+			// buffer, offset = buffer[:0], 0
 			return nil, nil, err
 		}
 		buffer = append(buffer, block[:n]...)

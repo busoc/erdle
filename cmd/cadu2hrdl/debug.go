@@ -75,7 +75,7 @@ func indexPackets(r io.Reader, by string) error {
 		}
 		if err != nil {
 			if n, ok := IsMissingCadu(err); ok {
-				missing = n
+				missing += n
 			} else if IsCRCError(err) {
 
 			} else {

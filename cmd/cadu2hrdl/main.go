@@ -677,7 +677,7 @@ func reassemble(addr, proxy string, n, b int) (<-chan []byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := c.SetReadBuffer(8 << 20); err != nil {
+	if err := c.SetReadBuffer(16 << 20); err != nil {
 		return nil, err
 	}
 	q := make(chan []byte, n)
