@@ -707,7 +707,8 @@ func reassemble(addr, proxy string, n, b int) (<-chan []byte, error) {
 		logger := log.New(os.Stderr, "[assemble] ", 0)
 		tick := time.Tick(5 * time.Second)
 		for range tick {
-			if count > 0 || skipped > 0 {
+			err := errMissing + errCRC
+			if count > 0 || skipped > 0 || err > 0 {
 				logger.Printf(row, count, skipped, dropped, errMissing, errCRC, size)
 
 				size = 0
