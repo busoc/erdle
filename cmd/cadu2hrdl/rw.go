@@ -214,7 +214,7 @@ func Unstuff(bs []byte) (int, []byte) {
 
 func UnstuffBytes(src, dst []byte) int {
 	z, n := int(binary.LittleEndian.Uint32(src[4:]))+12, len(src)
-	if d := n - z; d > 0 && d % CaduBodyLen == 0 {
+	if d := n - z; d > 0 && d%CaduBodyLen == 0 {
 		n -= d
 		src = src[:n]
 	}
@@ -233,11 +233,6 @@ func UnstuffBytes(src, dst []byte) int {
 }
 
 func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
-	// var (
-	// 	offset int
-	// 	buffer []byte
-	// )
-
 	buffer := make([]byte, 0, 256<<10)
 	if len(rest) > 0 {
 		buffer = append(buffer, rest...)
@@ -248,10 +243,6 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 	for {
 		n, err := r.Read(block)
 		if err != nil {
-			// if _, ok := IsMissingCadu(err); !(ok || IsCRCError(err)) {
-			// 	return nil, nil, err
-			// }
-			// buffer, offset = buffer[:0], 0
 			return nil, nil, err
 		}
 		buffer = append(buffer, block[:n]...)

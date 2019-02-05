@@ -640,11 +640,11 @@ func validate(queue <-chan []byte, n int, keep, strip bool) <-chan []byte {
 		}
 		for bs := range queue {
 			n, xs := Unstuff(bs)
-			if n < offset {
-				dropped++
+			z := int(binary.LittleEndian.Uint32(xs[4:])) + 12
+			if n < offset || len(xs) < z || len(xs) < 12 {
+				errLength++
 				continue
 			}
-			z := int(binary.LittleEndian.Uint32(xs[4:])) + 12
 			size += int64(z)
 			if keep {
 				sum := binary.LittleEndian.Uint32(xs[z-4:])
