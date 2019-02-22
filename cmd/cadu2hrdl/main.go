@@ -616,7 +616,7 @@ func validate(queue <-chan []byte, n int, keep, strip bool) <-chan []byte {
 		const row = "%6d packets, %4d dropped, %6dKB, %4d valid, %4d length error, %4d checksum error"
 		logger := log.New(os.Stderr, "[validate] ", 0)
 
-		tick := time.Tick(time.Second * 5)
+		tick := time.Tick(time.Second)
 		for range tick {
 			valid := count - errLength - errSum
 			if count > 0 || dropped > 0 {
@@ -705,7 +705,7 @@ func reassemble(addr, proxy string, n, b int) (<-chan []byte, error) {
 		const row = "%6d packets, %4d skipped, %4d dropped, %7d missing, %7d crc error, %7d bytes discarded"
 
 		logger := log.New(os.Stderr, "[assemble] ", 0)
-		tick := time.Tick(5 * time.Second)
+		tick := time.Tick(time.Second*5)
 		for range tick {
 			err := errMissing + errCRC
 			if count > 0 || skipped > 0 || err > 0 {
