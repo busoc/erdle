@@ -1,22 +1,24 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
-	"math"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/busoc/erdle/cmd/internal/roll"
+	"github.com/busoc/timutil"
 )
 
 type hrdp struct {
-	datadir string
-	payload uint8
+	datadir  string
+	filename string
+	payload  uint8
 
-	file   *os.File
-	writer *bufio.Writer
-	tick   <-chan time.Time
+	io.WriteCloser
 }
 
 func NewHRDP(dir string) (*hrdp, error) {
@@ -27,78 +29,69 @@ func NewHRDP(dir string) (*hrdp, error) {
 	hr := hrdp{
 		payload: 2,
 		datadir: dir,
-		tick:    time.Tick(time.Minute * 5),
 	}
 
-	hr.file, err = createHRDPFile(dir, time.Now().UTC())
+	o := roll.Options{
+		Interval: time.Minute,
+		Timeout:  time.Minute*5,
+		MaxSize:  512 << 20,
+		Wait:     true,
+	}
+	o.Open = hr.Open
+	hr.WriteCloser, err = roll.Roll(o)
 	if err != nil {
 		return nil, err
 	}
-	hr.writer = bufio.NewWriter(hr.file)
 	return &hr, nil
 }
 
 func (h *hrdp) Filename() string {
-	return h.file.Name()
+	return h.filename
+}
+
+func (h *hrdp) Open(_ int, w time.Time) (io.WriteCloser, error) {
+	datadir := h.datadir
+
+	y := fmt.Sprintf("%04d", w.Year())
+	d := fmt.Sprintf("%03d", w.YearDay())
+	r := fmt.Sprintf("%02d", w.Hour())
+
+	datadir = filepath.Join(datadir, y, d, r)
+	if err := os.MkdirAll(datadir, 0755); err != nil {
+		return nil, err
+	}
+	h.filename = fmt.Sprintf("rt_%s.dat", w.Format("150405"))
+	return os.OpenFile(filepath.Join(datadir, h.filename), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 }
 
 func (h *hrdp) Write(bs []byte) (int, error) {
-	select {
-	case t := <-h.tick:
-		if err := h.writer.Flush(); err != nil {
-			return 0, err
-		}
-		err := h.file.Close()
-		if err != nil {
-			return 0, err
-		}
-		h.file, err = createHRDPFile(h.datadir, t.UTC())
-		h.writer.Reset(h.file)
-	default:
-	}
-
 	var (
 		f uint32
 		c uint8
 	)
+	var buf bytes.Buffer
 
-	binary.Write(h.writer, binary.LittleEndian, uint32(len(bs)+14))
-	binary.Write(h.writer, binary.BigEndian, uint16(0))
-	binary.Write(h.writer, binary.BigEndian, h.payload)
-	binary.Write(h.writer, binary.BigEndian, bs[8])
+	binary.Write(&buf, binary.LittleEndian, uint32(len(bs)+14))
+	binary.Write(&buf, binary.BigEndian, uint16(0))
+	binary.Write(&buf, binary.BigEndian, h.payload)
+	binary.Write(&buf, binary.BigEndian, bs[8])
 	// set acquisition timestamp
 	coarse := binary.LittleEndian.Uint32(bs[16:])
 	fine := binary.LittleEndian.Uint16(bs[20:])
-	f, c = splitTime5(joinTime6(coarse, fine))
+	acq := timutil.Join6(coarse, fine)
+	f, c = timutil.Split5(timutil.GPSTime(acq, true))
 
-	binary.Write(h.writer, binary.BigEndian, f)
-	binary.Write(h.writer, binary.BigEndian, c)
+	binary.Write(&buf, binary.BigEndian, f)
+	binary.Write(&buf, binary.BigEndian, c)
 	//set reception timestamp
-	f, c = splitTime5(time.Now())
-	binary.Write(h.writer, binary.BigEndian, f)
-	binary.Write(h.writer, binary.BigEndian, c)
+	f, c = timutil.Split5(timutil.GPSTime(time.Now(), true))
+	binary.Write(&buf, binary.BigEndian, f)
+	binary.Write(&buf, binary.BigEndian, c)
 
-	if _, err := h.writer.Write(bs); err != nil {
+	buf.Write(bs)
+
+	if _, err := h.WriteCloser.Write(buf.Bytes()); err != nil {
 		return 0, err
 	}
 	return len(bs), nil
-}
-
-func splitTime5(t time.Time) (uint32, uint8) {
-	t = t.UTC().Add(-deltaGPS)
-
-	ms := t.Nanosecond() / int(time.Millisecond)
-	c := math.Ceil(float64(ms) / 1000 * 256)
-	return uint32(t.Unix()), uint8(c)
-}
-
-func createHRDPFile(dir string, t time.Time) (*os.File, error) {
-	y, d, h := t.Year(), t.YearDay(), t.Hour()
-	dir = filepath.Join(dir, fmt.Sprintf("%4d", y), fmt.Sprintf("%03d", d), fmt.Sprintf("%02d", h))
-	if err := os.MkdirAll(dir, 0755); err != nil && !os.IsExist(err) {
-		return nil, err
-	}
-	min := t.Truncate(time.Minute * 5).Minute()
-	n := fmt.Sprintf("rt_%02d_%02d.dat", min, min+4)
-	return os.Create(filepath.Join(dir, n))
 }
