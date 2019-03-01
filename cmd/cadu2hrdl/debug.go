@@ -12,6 +12,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/busoc/timutil"
 	"github.com/juju/ratelimit"
 	"github.com/midbel/ringbuffer"
 )
@@ -36,14 +37,14 @@ func indexPackets(r io.Reader, by string) error {
 			coarse := binary.LittleEndian.Uint32(bs[8:])
 			fine := binary.LittleEndian.Uint16(bs[12:])
 
-			return id, seq, joinTime6(coarse, fine)
+			return id, seq, timutil.Join6(coarse, fine)
 		}
 		hdrLen += HDRLen
 	case "origin", "source":
 		byFunc = func(bs []byte) (byte, uint32, time.Time) {
 			id, seq := byOrigin(bs)
 			e := binary.LittleEndian.Uint64(bs[23:])
-			return id, seq, gpsEpoch.Add(time.Duration(e))
+			return id, seq, timutil.GPS.Add(time.Duration(e))
 		}
 		hdrLen += HDRLen
 	case "channel", "":
@@ -53,7 +54,7 @@ func indexPackets(r io.Reader, by string) error {
 			coarse := binary.LittleEndian.Uint32(bs[8:])
 			fine := binary.LittleEndian.Uint16(bs[12:])
 
-			return id, seq, joinTime6(coarse, fine)
+			return id, seq, timutil.Join6(coarse, fine)
 		}
 	default:
 		return fmt.Errorf("unrecognized value %s", by)

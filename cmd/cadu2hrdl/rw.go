@@ -264,7 +264,7 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 			// verify the length of the buffer
 			// we've maybe a full HRDL packet and the loss of cadu happens when, at least, one filler has been received
 			// if we've enough bytes, we know that we've a full "valid" HRDL packet
-			if z := binary.LittleEndian.Uint32(buffer[WordLen:])+12; len(buffer) >= int(z) {
+			if z := binary.LittleEndian.Uint32(buffer[WordLen:]) + 12; len(buffer) >= int(z) {
 				return buffer, nil, nil
 			} else {
 				return nil, nil, err

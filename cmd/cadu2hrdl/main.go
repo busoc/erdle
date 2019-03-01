@@ -538,6 +538,8 @@ func runStore(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	defer hr.Close()
+
 	queue, err := reassemble(cmd.Flag.Arg(0), "", *q, *b)
 	if err != nil {
 		return err
@@ -705,7 +707,7 @@ func reassemble(addr, proxy string, n, b int) (<-chan []byte, error) {
 		const row = "%6d packets, %4d skipped, %4d dropped, %7d missing, %7d crc error, %7d bytes discarded"
 
 		logger := log.New(os.Stderr, "[assemble] ", 0)
-		tick := time.Tick(time.Second*5)
+		tick := time.Tick(time.Second * 5)
 		for range tick {
 			err := errMissing + errCRC
 			if count > 0 || skipped > 0 || err > 0 {

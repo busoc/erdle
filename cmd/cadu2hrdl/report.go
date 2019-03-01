@@ -8,16 +8,9 @@ import (
 	"io"
 	"log"
 	"time"
-)
 
-var (
-	leap       = time.Second * 18
-	gpsEpoch   = time.Date(1980, 1, 6, 0, 0, 0, 0, time.UTC)
-	unixEpoch  = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
-	deltaEpoch = gpsEpoch.Sub(unixEpoch) + leap
+	"github.com/busoc/timutil"
 )
-
-const deltaGPS = time.Duration(315964800) * time.Second
 
 type coze struct {
 	Count   int
@@ -176,7 +169,7 @@ func dumpErdle(i int, r *bytes.Reader) error {
 	binary.Read(rw, binary.LittleEndian, &fine)
 	binary.Read(rw, binary.LittleEndian, &spare)
 
-	vt := joinTime6(coarse, fine).Format("2006-01-02 15:04:05.000")
+	vt := timutil.Join6(coarse, fine).Format("2006-01-02 15:04:05.000")
 
 	binary.Read(rw, binary.LittleEndian, &property)
 	binary.Read(rw, binary.LittleEndian, &stream)
@@ -185,7 +178,7 @@ func dumpErdle(i int, r *bytes.Reader) error {
 	binary.Read(rw, binary.LittleEndian, &auxtime)
 	binary.Read(rw, binary.LittleEndian, &origin)
 
-	at := gpsEpoch.Add(acqtime).Format("2006-01-02 15:04:05.000")
+	at := timutil.GPS.Add(acqtime).Format("2006-01-02 15:04:05.000")
 
 	var mode string
 	rest := int(size) - (16 + 24) //16(VMU header length) + 24(HRD common header length)
@@ -231,12 +224,4 @@ func dumpErdle(i int, r *bytes.Reader) error {
 	}
 	log.Printf(row, i, size, channel, sequence, vt, mode, origin, counter, at, upi, sum, valid, md.Sum(nil))
 	return err
-}
-
-func joinTime6(coarse uint32, fine uint16) time.Time {
-	t := time.Unix(int64(coarse), 0).UTC()
-
-	fs := float64(fine) / 65536.0 * 1000.0
-	ms := time.Duration(fs) * time.Millisecond
-	return t.Add(ms + deltaEpoch).UTC()
 }
