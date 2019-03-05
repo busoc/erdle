@@ -20,6 +20,7 @@ import (
 	"github.com/busoc/erdle/cmd/internal/roll"
 	"github.com/midbel/cli"
 	"github.com/midbel/ringbuffer"
+	"github.com/midbel/toml"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -106,6 +107,7 @@ options:
 		Desc: `
 options:
 
+  -c          use given configuration file to load options
   -i INTERVAL time between automatic file rotation
   -t TIMEOUT  timeout before forcing file rotation
   -s SIZE     max size (in bytes) of a file before triggering a rotation
@@ -533,24 +535,53 @@ func runList(cmd *cli.Command, args []string) error {
 }
 
 func runStore(cmd *cli.Command, args []string) error {
-	var o roll.Options
-	cmd.Flag.DurationVar(&o.Interval, "i", time.Minute*5, "rotation interval")
-	cmd.Flag.DurationVar(&o.Timeout, "t", time.Minute, "rotation timeout")
-	cmd.Flag.IntVar(&o.MaxSize, "s", 0, "size threshold before rotation")
-	cmd.Flag.IntVar(&o.MaxCount, "c", 0, "packet threshold before rotation")
-	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
-	b := cmd.Flag.Int("b", 64<<20, "buffer size")
-	k := cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
+	// var o roll.Options
+
+	settings := struct {
+		Config  bool         `toml:"-"`
+		Address string       `toml:"address"`
+		Dir     string       `toml:"datadir"`
+		Roll    roll.Options `toml:"storage"`
+		Data    struct {
+			Buffer int  `toml:"buffer"`
+			Queue  int  `toml:"queue"`
+			Keep   bool `toml:"keep"`
+		} `toml:"hrdl"`
+	}{}
+	cmd.Flag.DurationVar(&settings.Roll.Interval, "i", time.Minute*5, "rotation interval")
+	cmd.Flag.DurationVar(&settings.Roll.Timeout, "t", time.Minute, "rotation timeout")
+	cmd.Flag.IntVar(&settings.Roll.MaxSize, "s", 0, "size threshold before rotation")
+	cmd.Flag.IntVar(&settings.Roll.MaxCount, "z", 0, "packet threshold before rotation")
+	cmd.Flag.IntVar(&settings.Data.Queue, "q", 64, "queue size before dropping HRDL packets")
+	cmd.Flag.IntVar(&settings.Data.Buffer, "b", 64<<20, "buffer size")
+	cmd.Flag.BoolVar(&settings.Data.Keep, "k", false, "keep invalid HRDL packets (bad sum only)")
+	cmd.Flag.BoolVar(&settings.Config, "c", false, "use a configuration file")
+
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	hr, err := NewHRDP(cmd.Flag.Arg(1), o)
+	if settings.Config {
+		r, err := os.Open(cmd.Flag.Arg(0))
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		if err := toml.NewDecoder(r).Decode(&settings); err != nil {
+			return err
+		}
+		settings.Roll.Interval = settings.Roll.Interval * time.Second
+		settings.Roll.Timeout = settings.Roll.Timeout * time.Second
+	} else {
+		settings.Address = cmd.Flag.Arg(0)
+		settings.Dir = cmd.Flag.Arg(1)
+	}
+	hr, err := NewHRDP(settings.Dir, settings.Roll)
 	if err != nil {
 		return err
 	}
 	defer hr.Close()
 
-	queue, err := reassemble(cmd.Flag.Arg(0), "", *q, *b)
+	queue, err := reassemble(settings.Address, "", settings.Data.Queue, settings.Data.Buffer)
 	if err != nil {
 		return err
 	}
@@ -569,7 +600,7 @@ func runStore(cmd *cli.Command, args []string) error {
 			}
 		}
 	}()
-	for bs := range validate(queue, *q, *k, false) {
+	for bs := range validate(queue, settings.Data.Queue, settings.Data.Keep, false) {
 		if n, err := hr.Write(bs); err != nil {
 			fail++
 			log.Println(err)
