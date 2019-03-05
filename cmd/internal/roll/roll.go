@@ -149,7 +149,7 @@ func (r *roller) run(o Options) {
 				written += n
 			}
 			if (o.MaxCount > 0 && count >= o.MaxCount) || (o.MaxSize > 0 && written > o.MaxSize) {
-        now = time.Now()
+				now = time.Now()
 				logger.Printf("threshold rotation @%s (%d - %d)", now.Format("2006-01-02 15:04:05"), written, count)
 			}
 		}
