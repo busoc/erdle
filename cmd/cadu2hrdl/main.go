@@ -118,7 +118,7 @@ options:
 `,
 	},
 	{
-		Usage: "relay [-b buffer] [-r rate] [-q queue] [-i instance] [-c conn] [-k keep] [-x proxy] <host:port> <host:port>",
+		Usage: "relay [-b buffer] [-r rate] [-q queue] [-i instance] [-c conn] [-k keep] <host:port> <host:port>",
 		Short: "reassemble incoming cadus to HRDL packets",
 		Run:   runRelay,
 		Desc: `
@@ -129,7 +129,6 @@ options:
   -i INSTANCE  hadock instance
   -r RATE      outgoing bandwidth rate
   -c CONN      number of connections to open to remote host
-  -x PROXY     host:port of a remote host
   -k           don't relay invalid HRDL packets
 `,
 	},
@@ -401,7 +400,6 @@ func runRelay(cmd *cli.Command, args []string) error {
 	i := cmd.Flag.Int("i", -1, "hadock instance used")
 	r := cmd.Flag.Int("r", 0, "bandwidth rate")
 	k := cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
-	x := cmd.Flag.String("x", "", "proxy incoming cadus to a remote address")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
@@ -409,7 +407,7 @@ func runRelay(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	queue, err := reassemble(cmd.Flag.Arg(0), *x, *q, *b)
+	queue, err := reassemble(cmd.Flag.Arg(0), *q, *b)
 	if err != nil {
 		return err
 	}
@@ -581,7 +579,7 @@ func runStore(cmd *cli.Command, args []string) error {
 	}
 	defer hr.Close()
 
-	queue, err := reassemble(settings.Address, "", settings.Data.Queue, settings.Data.Buffer)
+	queue, err := reassemble(settings.Address, settings.Data.Queue, settings.Data.Buffer)
 	if err != nil {
 		return err
 	}
@@ -620,7 +618,7 @@ func runDump(cmd *cli.Command, args []string) error {
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	queue, err := reassemble(cmd.Flag.Arg(0), "", *q, *b)
+	queue, err := reassemble(cmd.Flag.Arg(0), *q, *b)
 	if err != nil {
 		return err
 	}
@@ -711,7 +709,7 @@ func validate(queue <-chan []byte, n int, keep, strip bool) <-chan []byte {
 	return q
 }
 
-func reassemble(addr, proxy string, n, b int) (<-chan []byte, error) {
+func reassemble(addr string, n, b int) (<-chan []byte, error) {
 	a, err := net.ResolveUDPAddr(protoFromAddr(addr))
 	if err != nil {
 		return nil, err
@@ -725,22 +723,13 @@ func reassemble(addr, proxy string, n, b int) (<-chan []byte, error) {
 	}
 	q := make(chan []byte, n)
 
-	var rg io.Reader = c
+	var r io.Reader = c
 	if b > 0 {
 		rw := ringbuffer.NewRingSize(b, 0)
 		go func(r io.Reader) {
 			io.CopyBuffer(rw, r, make([]byte, 1024))
-		}(rg)
-		rg = rw
-	}
-
-	var r io.Reader = rg
-	switch x, err := net.Dial(protoFromAddr(proxy)); {
-	case err == nil:
-		r = io.TeeReader(r, x)
-	case err != nil && proxy == "":
-	default:
-		return nil, err
+		}(r)
+		r = rw
 	}
 
 	var dropped, skipped, size, count, errCRC, errMissing int64
