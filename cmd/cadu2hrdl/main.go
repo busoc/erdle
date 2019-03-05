@@ -536,7 +536,7 @@ func runStore(cmd *cli.Command, args []string) error {
 	var o roll.Options
 	cmd.Flag.DurationVar(&o.Interval, "i", time.Minute*5, "rotation interval")
 	cmd.Flag.DurationVar(&o.Timeout, "t", time.Minute, "rotation timeout")
-	cmd.Flag.IntVar(&o.MaxSize, "s", 512<<20, "size threshold before rotation")
+	cmd.Flag.IntVar(&o.MaxSize, "s", 0, "size threshold before rotation")
 	cmd.Flag.IntVar(&o.MaxCount, "c", 0, "packet threshold before rotation")
 	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
 	b := cmd.Flag.Int("b", 64<<20, "buffer size")

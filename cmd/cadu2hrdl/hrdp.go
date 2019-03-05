@@ -49,7 +49,7 @@ func (h *hrdp) Filename() string {
 	return h.filename
 }
 
-func (h *hrdp) Open(_ int, w time.Time) (io.WriteCloser, error) {
+func (h *hrdp) Open(n int, w time.Time) (io.WriteCloser, error) {
 	datadir := h.datadir
 
 	y := fmt.Sprintf("%04d", w.Year())
@@ -60,7 +60,7 @@ func (h *hrdp) Open(_ int, w time.Time) (io.WriteCloser, error) {
 	if err := os.MkdirAll(datadir, 0755); err != nil {
 		return nil, err
 	}
-	file := filepath.Join(datadir, fmt.Sprintf("rt_%s.dat", w.Format("150405")))
+	file := filepath.Join(datadir, fmt.Sprintf("rt_%06d_%s.dat", n, w.Format("150405")))
 	if file != h.filename {
 		go func(f string) {
 			i, err := os.Stat(f)
@@ -70,10 +70,10 @@ func (h *hrdp) Open(_ int, w time.Time) (io.WriteCloser, error) {
 			if i.Size() == 0 {
 				os.Remove(file)
 			}
-		}(file)
+		}(h.filename)
 	}
 	h.filename = file
-	return os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	return os.OpenFile(h.filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 }
 
 func (h *hrdp) Write(bs []byte) (int, error) {
