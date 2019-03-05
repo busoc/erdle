@@ -17,6 +17,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/busoc/erdle/cmd/internal/roll"
 	"github.com/midbel/cli"
 	"github.com/midbel/ringbuffer"
 	"golang.org/x/sync/errgroup"
@@ -105,9 +106,13 @@ options:
 		Desc: `
 options:
 
-  -b BUFFER  size of buffer between incoming cadus and reassembler
-  -q SIZE    size of the queue to store reassemble packets
-  -k         store HRDL packets even if they are corrupted
+  -i INTERVAL time between automatic file rotation
+  -t TIMEOUT  timeout before forcing file rotation
+  -s SIZE     max size (in bytes) of a file before triggering a rotation
+  -c COUNT    max number of packets in a file before triggering a rotation
+  -b BUFFER   size of buffer between incoming cadus and reassembler
+  -q SIZE     size of the queue to store reassemble packets
+  -k          store HRDL packets even if they are corrupted
 `,
 	},
 	{
@@ -528,13 +533,18 @@ func runList(cmd *cli.Command, args []string) error {
 }
 
 func runStore(cmd *cli.Command, args []string) error {
+	var o roll.Options
+	cmd.Flag.DurationVar(&o.Interval, "i", time.Minute*5, "rotation interval")
+	cmd.Flag.DurationVar(&o.Timeout, "t", time.Minute, "rotation timeout")
+	cmd.Flag.IntVar(&o.MaxSize, "s", 512<<20, "size threshold before rotation")
+	cmd.Flag.IntVar(&o.MaxCount, "c", 0, "packet threshold before rotation")
 	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
 	b := cmd.Flag.Int("b", 64<<20, "buffer size")
 	k := cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	hr, err := NewHRDP(cmd.Flag.Arg(1))
+	hr, err := NewHRDP(cmd.Flag.Arg(1), o)
 	if err != nil {
 		return err
 	}

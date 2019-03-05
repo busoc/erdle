@@ -21,7 +21,7 @@ type hrdp struct {
 	io.WriteCloser
 }
 
-func NewHRDP(dir string) (*hrdp, error) {
+func NewHRDP(dir string, o roll.Options) (*hrdp, error) {
 	err := os.MkdirAll(dir, 0755)
 	if err != nil && !os.IsExist(err) {
 		return nil, err
@@ -31,12 +31,12 @@ func NewHRDP(dir string) (*hrdp, error) {
 		datadir: dir,
 	}
 
-	o := roll.Options{
-		Interval: time.Minute,
-		Timeout:  time.Minute*5,
-		MaxSize:  512 << 20,
-		Wait:     true,
-	}
+	// o := roll.Options{
+	// 	Interval: interval,
+	// 	Timeout:  time.Second*10,
+	// 	MaxSize:  512 << 20,
+	// 	Wait:     true,
+	// }
 	o.Open = hr.Open
 	hr.WriteCloser, err = roll.Roll(o)
 	if err != nil {
@@ -60,8 +60,20 @@ func (h *hrdp) Open(_ int, w time.Time) (io.WriteCloser, error) {
 	if err := os.MkdirAll(datadir, 0755); err != nil {
 		return nil, err
 	}
-	h.filename = fmt.Sprintf("rt_%s.dat", w.Format("150405"))
-	return os.OpenFile(filepath.Join(datadir, h.filename), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file := filepath.Join(datadir, fmt.Sprintf("rt_%s.dat", w.Format("150405")))
+	if file != h.filename {
+		go func(f string) {
+			i, err := os.Stat(f)
+			if err != nil {
+				return
+			}
+			if i.Size() == 0 {
+				os.Remove(file)
+			}
+		}(file)
+	}
+	h.filename = file
+	return os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 }
 
 func (h *hrdp) Write(bs []byte) (int, error) {

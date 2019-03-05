@@ -3,6 +3,8 @@ package roll
 import (
 	"fmt"
 	"io"
+	"log"
+	"os"
 	"sync"
 	"time"
 )
@@ -117,6 +119,8 @@ func (r *roller) run(o Options) {
 		timeout = timer.C
 		defer timer.Stop()
 	}
+	logger := log.New(os.Stdout, "[rotate] ", 0)
+	// last := time.Now()
 
 	var written, count int
 	for {
@@ -128,10 +132,15 @@ func (r *roller) run(o Options) {
 		select {
 		case <-r.done:
 			return
-		case <-timeout:
+		case n := <-timeout:
+			// if n.Sub(last) < o.Timeout {
+			//   continue
+			// }
 			expired = true
+			logger.Printf("timeout rotation @%s", n.Format("2006-01-02 15:04:05"))
 		case n := <-interval:
 			now, reset = n, true
+			logger.Printf("automatic rotation @%s", n.Format("2006-01-02 15:04:05"))
 		case n := <-r.reset:
 			now, reset = n, true
 		case n := <-r.written:
@@ -140,7 +149,8 @@ func (r *roller) run(o Options) {
 				written += n
 			}
 			if (o.MaxCount > 0 && count >= o.MaxCount) || (o.MaxSize > 0 && written > o.MaxSize) {
-				now = time.Now()
+        now = time.Now()
+				logger.Printf("threshold rotation @%s (%d - %d)", now.Format("2006-01-02 15:04:05"), written, count)
 			}
 		}
 		if !now.IsZero() || expired {
@@ -155,12 +165,9 @@ func (r *roller) run(o Options) {
 				r.closeWriter(r.writer)
 			}
 			written, count = 0, 0
-			if o.Timeout > 0 && !expired {
-				if !timer.Stop() {
-					<-timer.C
-				}
-				timer.Reset(o.Timeout)
-			}
+		}
+		if o.Timeout > 0 {
+			timer.Reset(o.Timeout)
 		}
 	}
 }
