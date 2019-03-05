@@ -118,12 +118,13 @@ options:
 `,
 	},
 	{
-		Usage: "relay [-b buffer] [-r rate] [-q queue] [-i instance] [-c conn] [-k keep] <host:port> <host:port>",
+		Usage: "relay [-b buffer] [-c] [-r rate] [-q queue] [-i instance] [-c conn] [-k keep] <host:port> <host:port>",
 		Short: "reassemble incoming cadus to HRDL packets",
 		Run:   runRelay,
 		Desc: `
 options:
 
+  -c           use given configuration file to load options
   -b BUFFER    size of buffer between incoming cadus and reassembler
   -q SIZE      size of the queue to store reassembled HRDL packets
   -i INSTANCE  hadock instance
@@ -394,26 +395,53 @@ func runInspect(cmd *cli.Command, args []string) error {
 }
 
 func runRelay(cmd *cli.Command, args []string) error {
-	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
-	b := cmd.Flag.Int("b", 64<<20, "buffer size between socket and assembler")
-	c := cmd.Flag.Int("c", 8, "number of connections to remote server")
-	i := cmd.Flag.Int("i", -1, "hadock instance used")
-	r := cmd.Flag.Int("r", 0, "bandwidth rate")
-	k := cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
+	settings := struct {
+		Config bool `toml:"-"`
+		//incoming cadus settings
+		Local  string `toml:"local"`
+		Buffer int    `toml:"buffer"`
+		Queue  int    `toml:"queue"`
+		Keep   bool   `toml:"keep"`
+		//outgoging vmu settings
+		Remote   string `toml:"remote"`
+		Instance int    `toml:"instance"`
+		Rate     int    `toml:"rate"`
+		Num      int    `toml:"connections"`
+	}{}
+	cmd.Flag.IntVar(&settings.Queue, "q", 64, "queue size before dropping HRDL packets")
+	cmd.Flag.IntVar(&settings.Buffer, "b", 64<<20, "buffer size between socket and assembler")
+	cmd.Flag.IntVar(&settings.Num, "n", 8, "number of connections to remote server")
+	cmd.Flag.IntVar(&settings.Instance, "i", -1, "hadock instance used")
+	cmd.Flag.IntVar(&settings.Rate, "r", 0, "bandwidth rate")
+	cmd.Flag.BoolVar(&settings.Keep, "k", false, "keep invalid HRDL packets (bad sum only)")
+	cmd.Flag.BoolVar(&settings.Config, "c", false, "use a configuration file")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	p, err := NewPool(cmd.Flag.Arg(1), *c, *i, *r)
+	if settings.Config {
+		r, err := os.Open(cmd.Flag.Arg(0))
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		if err := toml.NewDecoder(r).Decode(&settings); err != nil {
+			return err
+		}
+	} else {
+		settings.Local = cmd.Flag.Arg(0)
+		settings.Remote = cmd.Flag.Arg(1)
+	}
+	p, err := NewPool(settings.Remote, settings.Num, settings.Instance, settings.Rate)
 	if err != nil {
 		return err
 	}
-	queue, err := reassemble(cmd.Flag.Arg(0), *q, *b)
+	queue, err := reassemble(settings.Local, settings.Queue, settings.Buffer)
 	if err != nil {
 		return err
 	}
 
 	var gp errgroup.Group
-	for bs := range validate(queue, *q, *k, true) {
+	for bs := range validate(queue, settings.Queue, settings.Keep, true) {
 		xs := bs
 		gp.Go(func() error {
 			_, err := p.Write(xs)
