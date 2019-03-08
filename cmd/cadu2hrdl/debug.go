@@ -232,17 +232,11 @@ func replayCadus(addr string, r io.Reader, rate int) (*coze, error) {
 }
 
 func traceCadus(addr string) error {
-	a, err := net.ResolveUDPAddr(protoFromAddr(addr))
+	c, err := listenUDP(addr)
 	if err != nil {
 		return err
 	}
-	c, err := net.ListenUDP("udp", a)
-	if err != nil {
-		return err
-	}
-	if err := c.SetReadBuffer(16 << 20); err != nil {
-		return err
-	}
+
 	tick := time.Tick(time.Second)
 	logger := log.New(os.Stderr, "[debug] ", 0)
 
