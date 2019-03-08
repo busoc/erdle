@@ -569,6 +569,7 @@ func runStore(cmd *cli.Command, args []string) error {
 		Dir     string       `toml:"datadir"`
 		Roll    roll.Options `toml:"storage"`
 		Data    struct {
+			Raw    bool `toml:"hrdfe"`
 			Buffer int  `toml:"buffer"`
 			Queue  int  `toml:"queue"`
 			Keep   bool `toml:"keep"`
@@ -581,6 +582,7 @@ func runStore(cmd *cli.Command, args []string) error {
 	cmd.Flag.IntVar(&settings.Data.Queue, "q", 64, "queue size before dropping HRDL packets")
 	cmd.Flag.IntVar(&settings.Data.Buffer, "b", 64<<20, "buffer size")
 	cmd.Flag.BoolVar(&settings.Data.Keep, "k", false, "keep invalid HRDL packets (bad sum only)")
+	cmd.Flag.BoolVar(&settings.Data.Raw, "e", false, "store only VCDUS packets")
 	cmd.Flag.BoolVar(&settings.Config, "c", false, "use a configuration file")
 
 	if err := cmd.Flag.Parse(args); err != nil {
@@ -601,16 +603,33 @@ func runStore(cmd *cli.Command, args []string) error {
 		settings.Address = cmd.Flag.Arg(0)
 		settings.Dir = cmd.Flag.Arg(1)
 	}
-	hr, err := NewHRDP(settings.Dir, settings.Roll)
+	var (
+		prefix string
+		queue  <-chan []byte
+	)
+	hr, err := NewWriter(settings.Dir, settings.Roll, settings.Data.Raw)
 	if err != nil {
 		return err
 	}
 	defer hr.Close()
-
-	queue, err := reassemble(settings.Address, settings.Data.Queue, settings.Data.Buffer)
-	if err != nil {
-		return err
+	if settings.Data.Raw {
+		prefix = "[hrdfe]"
+		queue, err = readPackets(settings.Address, settings.Data.Queue, settings.Data.Buffer)
+		if err != nil {
+			return err
+		}
+	} else {
+		prefix = "[hrdp]"
+		q, err := reassemble(settings.Address, settings.Data.Queue, settings.Data.Buffer)
+		if err != nil {
+			return err
+		}
+		queue = validate(q, settings.Data.Queue, settings.Data.Keep, false)
 	}
+	return storePackets(hr, queue, prefix)
+}
+
+func storePackets(hr Writer, queue <-chan []byte, prefix string) error {
 	var (
 		count int
 		size  int
@@ -618,7 +637,7 @@ func runStore(cmd *cli.Command, args []string) error {
 	)
 	go func() {
 		tick := time.Tick(time.Second * 5)
-		logger := log.New(os.Stderr, "[hrdp] ", 0)
+		logger := log.New(os.Stderr, prefix+" ", 0)
 		for range tick {
 			if count > 0 || fail > 0 {
 				logger.Printf("%s: %6d packets, %7dKB, %6d failures", hr.Filename(), count, size>>10, fail)
@@ -626,7 +645,7 @@ func runStore(cmd *cli.Command, args []string) error {
 			}
 		}
 	}()
-	for bs := range validate(queue, settings.Data.Queue, settings.Data.Keep, false) {
+	for bs := range queue {
 		if n, err := hr.Write(bs); err != nil {
 			fail++
 			log.Println(err)
@@ -825,6 +844,41 @@ func reassemble(addr string, n, b int) (<-chan []byte, error) {
 			} else {
 				log.Println(err)
 				return
+			}
+		}
+	}()
+	return q, nil
+}
+
+func readPackets(addr string, n, b int) (<-chan []byte, error) {
+	c, err := listenUDP(addr)
+	if err != nil {
+		return nil, err
+	}
+	q := make(chan []byte, n)
+
+	var r io.Reader = c
+	if b > 0 {
+		rw := ringbuffer.NewRingSize(b, 0)
+		go func(r io.Reader) {
+			io.CopyBuffer(rw, r, make([]byte, 1024))
+		}(r)
+		r = rw
+	}
+	go func() {
+		defer func() {
+			c.Close()
+			close(q)
+		}()
+		r := VCDUReader(r, 0)
+		for {
+			body := make([]byte, 1024)
+			if _, err := r.Read(body); err != nil {
+				continue
+			}
+			select {
+			case q <- body:
+			default:
 			}
 		}
 	}()
