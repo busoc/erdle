@@ -874,7 +874,7 @@ func readPackets(addr string, n, b int) (<-chan []byte, error) {
 		for {
 			body := make([]byte, 1024)
 			if _, err := r.Read(body); err != nil {
-				continue
+				
 			}
 			select {
 			case q <- body:
