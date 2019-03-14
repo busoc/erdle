@@ -68,6 +68,24 @@ following conditions (depending also of the options set):
 * time interval elapsed between two rotations
 * timeout since last write
 
+The following options can be given to the store command:
+
+```
+  -c          use given configuration file to load options
+  -i INTERVAL time between automatic file rotation
+  -t TIMEOUT  timeout before forcing file rotation
+  -s SIZE     max size (in bytes) of a file before triggering a rotation
+  -c COUNT    max number of packets in a file before triggering a rotation
+  -b BUFFER   size of buffer between incoming cadus and reassembler
+  -p PAYLOAD  identifier of source payload
+  -q SIZE     size of the queue to store reassemble packets
+  -k          store HRDL packets even if they are corrupted
+```
+
+A configuration file (using [toml](https://github.com/toml-lang/toml)) can also
+be use instead of the command line options if multiple instance of this command
+should runned simulatenously (eg when they have to be managed by systemd)
+
 ```
 # sample configuration file for store command
 
