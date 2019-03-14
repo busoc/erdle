@@ -1,4 +1,4 @@
-# erdle
+[![Go Report Card](https://goreportcard.com/badge/github.com/busoc/erdle)](https://goreportcard.com/report/github.com/busoc/erdle)
 
 The erdle tool suite can be used for just anything that can be done on VCDU (aka
 CADU) packets.
@@ -40,9 +40,59 @@ stream. the procedure is as follows:
   requested
 7. repeat the process until end of stream
 
+# erdle relay
+
+The ``relay`` command can be used as a proxy between a source sending a stream of
+VCDU and a destination that is only expecting a stream of HRDL packets.
+
+The role of this command will then be to reassemble HRDL packets from incoming
+VCDU packets and then send all complete HRDL packets (valid or not - depending
+of the configuration) to the destination. However, reassembling of one HRDL packet
+can be aborted two circumstances:
+
+* missing VCDU and/or unordered VCDU packets
+* invalid VCDU CRC
+
+In this two cases, ``relay`` stops the reassembling of the current packet and
+starts to search for the synchronization word of the next HRDL packet.
+
+The following options can be given to the ``relay`` command:
+
+```
+-c           use given configuration file to load options
+-b BUFFER    size of buffer between incoming cadus and reassembler
+-q SIZE      size of the queue to store reassembled HRDL packets
+-i INSTANCE  hadock instance
+-r RATE      outgoing bandwidth rate
+-c CONN      number of connections to open to remote host
+-k           don't relay invalid HRDL packets
+```
+
+A configuration file (using [toml](https://github.com/toml-lang/toml)) can also
+be use instead of the command line options if multiple instance of this command
+should runned simulatenously (eg when they have to be managed by systemd):
+
+```
+# sample configuration file for relay command
+
+# incoming cadus
+local  = "udp://0.0.0.0:11001" # unicast and multicast address are supported
+buffer = 67108864
+queue  = 1024
+keep   = false
+
+# outgoing hrdl
+remote      = "tcp://127.0.0.1:10015"
+instance    = 255
+rate        = 4194304
+connections = 16
+```
+
+Note that configured options will overwrite options given on the command line.
+
 # erdle store
 
-the store command of erdle can be used, as its name implies, to store under a
+the ``store`` command of erdle can be used, as its name implies, to store under a
 dedicated directory, the two kind of packets that erdle can deal with (but not
 both at the same time):
 
@@ -51,7 +101,8 @@ both at the same time):
 
 According to the type of packets to be written on disk, this command will adapt
 the format used to store these in files. The file format is mainly a binary flat
-file with some extra headers (specific to its type) added before each packets.
+file with some extra headers (specific to the configured type) added before each
+packets.
 
 HRDL packets will be store as the HRDP does for this kind of packets in rt files.
 This way existing tools able to decode rt files can also be used to decode and/or
@@ -68,7 +119,7 @@ following conditions (depending also of the options set):
 * time interval elapsed between two rotations
 * timeout since last write
 
-The following options can be given to the store command:
+The following options can be given to the ``store`` command:
 
 ```
   -c          use given configuration file to load options
@@ -84,15 +135,16 @@ The following options can be given to the store command:
 
 A configuration file (using [toml](https://github.com/toml-lang/toml)) can also
 be use instead of the command line options if multiple instance of this command
-should runned simulatenously (eg when they have to be managed by systemd)
+should runned simulatenously (eg when they have to be managed by systemd):
 
 ```
 # sample configuration file for store command
 
-address   = "udp://:10015"
+address   = "udp://:10015"  # unicast and multicast address are supported
 datadir   = "var/hrdp/vmu"
 
 [hrdl]
+# to store VCDU instead of HRDL packets, set the value to the payload to 0 or comment it
 payload = 2
 buffer  = 67108864
 queue   = 1024
@@ -101,6 +153,8 @@ keep    = false
 [storage]
 interval  = 300
 timeout   = 10
-maxsize   = 0
-maxcount  = 0
+maxsize   = 0 # only timeout or interval rotation
+maxcount  = 0 # only timeout or interval rotation
 ```
+
+Note that configured options will overwrite options given on the command line.
