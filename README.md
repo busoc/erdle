@@ -31,10 +31,10 @@ stream. the procedure is as follows:
 3. stop filling the buffer when another synchronization word is found
 4. perform bytes unstuffing if needed
 5. compare the length of the buffer with the length given in the HRDL header
-  - if there are not enough bytes, discard the packet
-  - if there are too many bytes, discard the trailing zeros (that should come
+   - if there are not enough bytes, discard the packet
+   - if there are too many bytes, discard the trailing zeros (that should come
     from 1-4 VCDU fillers)
-  - otherwise do nothing and go to the next step
+   - otherwise do nothing and go to the next step
 6. optionally, verify that the checksum found in the trailer of the HRDL packet
   matches the calculated one. If the checksums mismatch discard the packet if
   requested
