@@ -567,6 +567,7 @@ func runStore(cmd *cli.Command, args []string) error {
 		Config  bool         `toml:"-"`
 		Address string       `toml:"address"`
 		Dir     string       `toml:"datadir"`
+		Payload uint         `toml:"payload"`
 		Roll    roll.Options `toml:"storage"`
 		Data    struct {
 			Raw    bool `toml:"hrdfe"`
@@ -577,6 +578,7 @@ func runStore(cmd *cli.Command, args []string) error {
 	}{}
 	cmd.Flag.DurationVar(&settings.Roll.Interval, "i", time.Minute*5, "rotation interval")
 	cmd.Flag.DurationVar(&settings.Roll.Timeout, "t", time.Minute, "rotation timeout")
+	cmd.Flag.UintVar(&settings.Payload, "p", 0, "payload identifier")
 	cmd.Flag.IntVar(&settings.Roll.MaxSize, "s", 0, "size threshold before rotation")
 	cmd.Flag.IntVar(&settings.Roll.MaxCount, "z", 0, "packet threshold before rotation")
 	cmd.Flag.IntVar(&settings.Data.Queue, "q", 64, "queue size before dropping HRDL packets")
@@ -607,7 +609,7 @@ func runStore(cmd *cli.Command, args []string) error {
 		prefix string
 		queue  <-chan []byte
 	)
-	hr, err := NewWriter(settings.Dir, settings.Roll, settings.Data.Raw)
+	hr, err := NewWriter(settings.Dir, settings.Roll, uint8(settings.Payload), settings.Data.Raw)
 	if err != nil {
 		return err
 	}
@@ -873,8 +875,16 @@ func readPackets(addr string, n, b int) (<-chan []byte, error) {
 		r := VCDUReader(r, 0)
 		for {
 			body := make([]byte, 1024)
-			if n, err := r.Read(body); err != nil {
-
+			n, err := r.Read(body)
+			if n < len(body) {
+				continue
+			}
+			if err != nil {
+				if IsCaduError(err) {
+					continue
+				} else {
+					return
+				}
 			}
 			select {
 			case q <- body:

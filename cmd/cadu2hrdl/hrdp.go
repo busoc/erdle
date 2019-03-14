@@ -18,11 +18,11 @@ type Writer interface {
 	Filename() string
 }
 
-func NewWriter(dir string, o roll.Options, raw bool) (Writer, error) {
+func NewWriter(dir string, o roll.Options, payload uint8, raw bool) (Writer, error) {
 	if raw {
 		return NewHRDFE(dir, o)
 	} else {
-		return NewHRDP(dir, o)
+		return NewHRDP(dir, payload, o)
 	}
 }
 
@@ -103,13 +103,13 @@ type hrdp struct {
 	io.WriteCloser
 }
 
-func NewHRDP(dir string, o roll.Options) (Writer, error) {
+func NewHRDP(dir string, payload uint8, o roll.Options) (Writer, error) {
 	err := os.MkdirAll(dir, 0755)
 	if err != nil && !os.IsExist(err) {
 		return nil, err
 	}
 	hr := hrdp{
-		payload: 2,
+		payload: payload,
 		datadir: dir,
 	}
 
