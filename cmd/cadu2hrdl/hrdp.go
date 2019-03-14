@@ -18,8 +18,8 @@ type Writer interface {
 	Filename() string
 }
 
-func NewWriter(dir string, o roll.Options, payload uint8, raw bool) (Writer, error) {
-	if raw {
+func NewWriter(dir string, o roll.Options, payload uint8) (Writer, error) {
+	if payload == 0 {
 		return NewHRDFE(dir, o)
 	} else {
 		return NewHRDP(dir, payload, o)

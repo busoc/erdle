@@ -113,6 +113,7 @@ options:
   -s SIZE     max size (in bytes) of a file before triggering a rotation
   -c COUNT    max number of packets in a file before triggering a rotation
   -b BUFFER   size of buffer between incoming cadus and reassembler
+  -p PAYLOAD  identifier of source payload
   -q SIZE     size of the queue to store reassemble packets
   -k          store HRDL packets even if they are corrupted
 `,
@@ -567,24 +568,22 @@ func runStore(cmd *cli.Command, args []string) error {
 		Config  bool         `toml:"-"`
 		Address string       `toml:"address"`
 		Dir     string       `toml:"datadir"`
-		Payload uint         `toml:"payload"`
 		Roll    roll.Options `toml:"storage"`
 		Data    struct {
-			Raw    bool `toml:"hrdfe"`
-			Buffer int  `toml:"buffer"`
-			Queue  int  `toml:"queue"`
-			Keep   bool `toml:"keep"`
+			Payload uint `toml:"payload"`
+			Buffer  int  `toml:"buffer"`
+			Queue   int  `toml:"queue"`
+			Keep    bool `toml:"keep"`
 		} `toml:"hrdl"`
 	}{}
 	cmd.Flag.DurationVar(&settings.Roll.Interval, "i", time.Minute*5, "rotation interval")
 	cmd.Flag.DurationVar(&settings.Roll.Timeout, "t", time.Minute, "rotation timeout")
-	cmd.Flag.UintVar(&settings.Payload, "p", 0, "payload identifier")
+	cmd.Flag.UintVar(&settings.Data.Payload, "p", 0, "payload identifier")
 	cmd.Flag.IntVar(&settings.Roll.MaxSize, "s", 0, "size threshold before rotation")
 	cmd.Flag.IntVar(&settings.Roll.MaxCount, "z", 0, "packet threshold before rotation")
 	cmd.Flag.IntVar(&settings.Data.Queue, "q", 64, "queue size before dropping HRDL packets")
 	cmd.Flag.IntVar(&settings.Data.Buffer, "b", 64<<20, "buffer size")
 	cmd.Flag.BoolVar(&settings.Data.Keep, "k", false, "keep invalid HRDL packets (bad sum only)")
-	cmd.Flag.BoolVar(&settings.Data.Raw, "e", false, "store only VCDUS packets")
 	cmd.Flag.BoolVar(&settings.Config, "c", false, "use a configuration file")
 
 	if err := cmd.Flag.Parse(args); err != nil {
@@ -609,12 +608,12 @@ func runStore(cmd *cli.Command, args []string) error {
 		prefix string
 		queue  <-chan []byte
 	)
-	hr, err := NewWriter(settings.Dir, settings.Roll, uint8(settings.Payload), settings.Data.Raw)
+	hr, err := NewWriter(settings.Dir, settings.Roll, uint8(settings.Data.Payload))
 	if err != nil {
 		return err
 	}
 	defer hr.Close()
-	if settings.Data.Raw {
+	if settings.Data.Payload == 0 {
 		prefix = "[hrdfe]"
 		queue, err = readPackets(settings.Address, settings.Data.Queue, settings.Data.Buffer)
 		if err != nil {
