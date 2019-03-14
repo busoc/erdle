@@ -873,8 +873,8 @@ func readPackets(addr string, n, b int) (<-chan []byte, error) {
 		r := VCDUReader(r, 0)
 		for {
 			body := make([]byte, 1024)
-			if _, err := r.Read(body); err != nil {
-				
+			if n, err := r.Read(body); err != nil {
+
 			}
 			select {
 			case q <- body:
