@@ -5,11 +5,12 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	"hash"
 	"hash/adler32"
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/busoc/erdle"
 )
 
 var sumEmpty uint32
@@ -71,7 +72,7 @@ func copyFile(w io.Writer, file string, skip int, fill bool) (copyStat, error) {
 	}
 	defer r.Close()
 
-	body := make([]byte, 1024+skip)
+	body := make([]byte, erdle.CaduLen+skip)
 	for {
 		_, err := r.Read(body)
 		if err == io.EOF {
@@ -80,7 +81,7 @@ func copyFile(w io.Writer, file string, skip int, fill bool) (copyStat, error) {
 		if err != nil {
 			return stat, err
 		}
-		if s := adler32.Checksum(body[skip+14 : skip+1022]); !fill && s == sumEmpty {
+		if s := adler32.Checksum(body[skip+erdle.CaduHeaderLen : skip+erdle.CaduBodyLen]); !fill && s == sumEmpty {
 			stat.Skip++
 			continue
 		}
@@ -122,61 +123,10 @@ func (w *writer) Write(bs []byte) (int, error) {
 			w.next = 0
 		}
 		binary.BigEndian.PutUint32(bs[6:], w.next<<8)
-		binary.BigEndian.PutUint16(bs[1022:], Sum(bs[4:1022]))
+		binary.BigEndian.PutUint16(bs[erdle.CaduBodyLen:], erdle.Sum(bs[erdle.MagicLen:erdle.CaduBodyLen]))
 		w.next++
 	} else {
 		bs = bs[14:1022]
 	}
 	return w.inner.Write(bs)
-}
-
-const (
-	vcduCITT = uint16(0xFFFF)
-	vcduPOLY = uint16(0x1021)
-)
-
-type vcduSum struct {
-	sum uint16
-}
-
-func Sum(bs []byte) uint16 {
-	s := SumVCDU()
-	s.Write(bs)
-	return uint16(s.Sum32())
-}
-
-func SumVCDU() hash.Hash32 {
-	var v vcduSum
-	v.Reset()
-	return &v
-}
-
-func (v *vcduSum) Size() int      { return 2 }
-func (v *vcduSum) BlockSize() int { return 32 }
-func (v *vcduSum) Reset()         { v.sum = vcduCITT }
-
-func (v *vcduSum) Sum(bs []byte) []byte {
-	v.Write(bs)
-	vs := make([]byte, v.Size()*2)
-	binary.BigEndian.PutUint32(vs, uint32(v.sum))
-
-	return vs
-}
-
-func (v *vcduSum) Sum32() uint32 {
-	return uint32(v.sum)
-}
-
-func (v *vcduSum) Write(bs []byte) (int, error) {
-	for i := 0; i < len(bs); i++ {
-		v.sum ^= uint16(bs[i]) << 8
-		for j := 0; j < 8; j++ {
-			if (v.sum & 0x8000) > 0 {
-				v.sum = (v.sum << 1) ^ vcduPOLY
-			} else {
-				v.sum = v.sum << 1
-			}
-		}
-	}
-	return len(bs), nil
 }

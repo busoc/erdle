@@ -8,12 +8,11 @@ import (
 	"os"
 	"time"
 
+	"github.com/busoc/erdle"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 )
-
-var Magic = []byte{0x1a, 0xcf, 0xfc, 0x1d}
 
 type Coze struct {
 	Count   int
@@ -82,7 +81,7 @@ func listCadus(h *pcap.Handle, c *Coze, list, gap bool) error {
 		}
 
 		xs := p.ApplicationLayer().Payload()
-		if !bytes.HasPrefix(xs, Magic) {
+		if !bytes.HasPrefix(xs, erdle.Magic) {
 			continue
 		}
 		c.Count++
