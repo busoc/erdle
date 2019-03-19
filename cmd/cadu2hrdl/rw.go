@@ -3,86 +3,35 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
-	"hash"
 	"io"
-	"os"
-	"sort"
 
 	"github.com/busoc/erdle"
 )
 
-type multiReader struct {
-	file  *os.File
-	files []string
-}
-
-func MultiReader(ps []string) (io.Reader, error) {
-	if len(ps) == 0 {
-		return nil, fmt.Errorf("no files given")
-	}
-	sort.Strings(ps)
-	f, err := os.Open(ps[0])
-	if err != nil {
-		return nil, err
-	}
-	m := multiReader{file: f}
-	if len(ps) > 1 {
-		m.files = ps[1:]
-	} else {
-		m.files = ps[:0]
-	}
-	return &m, nil
-}
-
-func (m *multiReader) Read(bs []byte) (int, error) {
-	if len(m.files) == 0 && m.file == nil {
-		return 0, io.EOF
-	}
-	n, err := m.file.Read(bs)
-	if err == io.EOF {
-		m.file.Close()
-		if len(m.files) > 0 {
-			if m.file, err = os.Open(m.files[0]); err != nil {
-				return 0, err
-			}
-			if len(m.files) == 1 {
-				m.files = m.files[:0]
-			} else {
-				m.files = m.files[1:]
-			}
-			return 0, nil
-		} else {
-			m.file = nil
-		}
-	}
-	return n, err
-}
-
-type vcduReader struct {
-	skip    int
-	inner   io.Reader
-	counter uint32
-	body    bool
-	digest  hash.Hash32
-}
-
-func CaduReader(r io.Reader, skip int) io.Reader {
-	return &vcduReader{
-		skip:   skip,
-		inner:  r,
-		body:   true,
-		digest: erdle.SumVCDU(),
-	}
-}
-
-func VCDUReader(r io.Reader, skip int) io.Reader {
-	return &vcduReader{
-		skip:   skip,
-		inner:  r,
-		digest: erdle.SumVCDU(),
-	}
-}
+// type vcduReader struct {
+// 	skip    int
+// 	inner   io.Reader
+// 	counter uint32
+// 	body    bool
+// 	digest  hash.Hash32
+// }
+//
+// func CaduReader(r io.Reader, skip int) io.Reader {
+// 	return &vcduReader{
+// 		skip:   skip,
+// 		inner:  r,
+// 		body:   true,
+// 		digest: erdle.SumVCDU(),
+// 	}
+// }
+//
+// func VCDUReader(r io.Reader, skip int) io.Reader {
+// 	return &vcduReader{
+// 		skip:   skip,
+// 		inner:  r,
+// 		digest: erdle.SumVCDU(),
+// 	}
+// }
 
 const (
 	CaduBodyLen      = 1008
@@ -93,45 +42,45 @@ const (
 	CaduCounterMask  = 0xFFFFFF
 )
 
-func (r *vcduReader) Read(bs []byte) (int, error) {
-	defer r.digest.Reset()
-	xs := make([]byte, r.skip+CaduLen)
-	// n, err := r.inner.Read(xs)
-	n, err := io.ReadFull(r.inner, xs)
-	if err != nil {
-		return n, err
-	}
-	if n == 0 {
-		return r.Read(bs)
-	}
-	if !bytes.HasPrefix(xs[r.skip:], Magic) {
-		return 0, erdle.ErrMagic
-	}
-	if s := r.digest.Sum(xs[r.skip+4 : r.skip+CaduTrailerIndex]); !bytes.Equal(s[2:], xs[r.skip+CaduTrailerIndex:r.skip+CaduLen]) {
-		w := binary.BigEndian.Uint16(xs[r.skip+CaduTrailerIndex:])
-		g := binary.BigEndian.Uint16(s[2:])
-		err = erdle.CRCError{Want: w, Got: g}
-	}
-
-	curr := binary.BigEndian.Uint32(xs[r.skip+6:]) >> 8
-	if curr < r.counter {
-		if err == nil {
-			err = erdle.MissingCaduError{From: curr, To: r.counter}
-		}
-	}
-	if diff := (curr - r.counter) & CaduCounterMask; diff != curr && diff > 1 {
-		if err == nil {
-			err = erdle.MissingCaduError{From: r.counter, To: curr}
-		}
-	}
-	r.counter = curr
-	if r.body {
-		n = copy(bs, xs[r.skip+CaduHeaderLen:r.skip+CaduTrailerIndex])
-	} else {
-		n = copy(bs, xs[r.skip:])
-	}
-	return n, err
-}
+// func (r *vcduReader) Read(bs []byte) (int, error) {
+// 	defer r.digest.Reset()
+// 	xs := make([]byte, r.skip+CaduLen)
+// 	// n, err := r.inner.Read(xs)
+// 	n, err := io.ReadFull(r.inner, xs)
+// 	if err != nil {
+// 		return n, err
+// 	}
+// 	if n == 0 {
+// 		return r.Read(bs)
+// 	}
+// 	if !bytes.HasPrefix(xs[r.skip:], Magic) {
+// 		return 0, erdle.ErrMagic
+// 	}
+// 	if s := r.digest.Sum(xs[r.skip+4 : r.skip+CaduTrailerIndex]); !bytes.Equal(s[2:], xs[r.skip+CaduTrailerIndex:r.skip+CaduLen]) {
+// 		w := binary.BigEndian.Uint16(xs[r.skip+CaduTrailerIndex:])
+// 		g := binary.BigEndian.Uint16(s[2:])
+// 		err = erdle.CRCError{Want: w, Got: g}
+// 	}
+//
+// 	curr := binary.BigEndian.Uint32(xs[r.skip+6:]) >> 8
+// 	if curr < r.counter {
+// 		if err == nil {
+// 			err = erdle.MissingCaduError{From: curr, To: r.counter}
+// 		}
+// 	}
+// 	if diff := (curr - r.counter) & CaduCounterMask; diff != curr && diff > 1 {
+// 		if err == nil {
+// 			err = erdle.MissingCaduError{From: r.counter, To: curr}
+// 		}
+// 	}
+// 	r.counter = curr
+// 	if r.body {
+// 		n = copy(bs, xs[r.skip+CaduHeaderLen:r.skip+CaduTrailerIndex])
+// 	} else {
+// 		n = copy(bs, xs[r.skip:])
+// 	}
+// 	return n, err
+// }
 
 type hrdlReader struct {
 	inner io.Reader
@@ -139,7 +88,7 @@ type hrdlReader struct {
 }
 
 func HRDLReader(r io.Reader, skip int) io.Reader {
-	return &hrdlReader{inner: CaduReader(r, skip)}
+	return &hrdlReader{inner: erdle.CaduReader(r, skip)}
 }
 
 func (r *hrdlReader) Read(bs []byte) (int, error) {

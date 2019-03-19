@@ -130,7 +130,7 @@ func inspectCadus(rs io.Reader, skip int) error {
 		buffer  []byte
 	)
 
-	r := CaduReader(rs, skip)
+	r := erdle.CaduReader(rs, skip)
 	body := make([]byte, 1008)
 	sum := adler32.Checksum(body)
 	for {

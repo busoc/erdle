@@ -1,9 +1,71 @@
 package erdle
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 )
+
+var (
+	Word  = []byte{0xf8, 0x2e, 0x35, 0x53}
+	Stuff = []byte{0xf8, 0x2e, 0x35, 0xaa}
+	Magic = []byte{0x1a, 0xcf, 0xfc, 0x1d}
+)
+
+const WordLen = 4
+
+const (
+	CaduBodyLen      = 1008
+	CaduLen          = 1024
+	CaduHeaderLen    = 14
+	CaduTrailerLen   = 2
+	CaduTrailerIndex = CaduHeaderLen + CaduBodyLen
+	CaduCounterMask  = 0xFFFFFF
+)
+
+func StuffBytes(bs []byte) []byte {
+	offset := WordLen * 2
+
+	xs := make([]byte, 0, len(bs))
+	xs = append(xs, bs[:offset]...)
+	for {
+		if ix := bytes.Index(bs[offset:], Word); ix < 0 {
+			break
+		} else {
+			xs = append(xs, bs[offset:offset+ix]...)
+			xs = append(xs, Stuff...)
+
+			offset += ix + WordLen - 1
+		}
+	}
+	return append(xs, bs[offset:]...)
+}
+
+func Unstuff(bs []byte) (int, []byte) {
+	xs := make([]byte, len(bs))
+	return UnstuffBytes(bs, xs), xs
+}
+
+func UnstuffBytes(src, dst []byte) int {
+	z, n := int(binary.LittleEndian.Uint32(src[4:]))+12, len(src)
+	if d := n - z; d > 0 && d%CaduBodyLen == 0 {
+		n -= d
+		src = src[:n]
+	}
+	var nn, offset int
+	if n > z {
+		for {
+			if ix := bytes.Index(src[offset:], Stuff); ix < 0 {
+				break
+			} else {
+				nn += copy(dst[nn:], src[offset:offset+ix+3])
+				offset += ix + len(Stuff)
+			}
+		}
+	}
+	return nn + copy(dst[nn:], src[offset:])
+}
 
 var ErrMagic = errors.New("cadu: invalid magic")
 

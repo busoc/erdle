@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/busoc/erdle"
+	"github.com/busoc/erdle/cmd/internal/multireader"
 	"github.com/busoc/erdle/cmd/internal/roll"
 	"github.com/midbel/cli"
 	"github.com/midbel/ringbuffer"
@@ -248,11 +249,11 @@ func runIndex(cmd *cli.Command, args []string) error {
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	mr, err := MultiReader(cmd.Flag.Args())
+	mr, err := multireader.New(cmd.Flag.Args())
 	if err != nil {
 		return err
 	}
-	return indexPackets(VCDUReader(mr, *count), strings.ToLower(*by))
+	return indexPackets(erdle.VCDUReader(mr, *count), strings.ToLower(*by))
 }
 
 func runSplit(cmd *cli.Command, args []string) error {
@@ -369,7 +370,7 @@ func runInspect(cmd *cli.Command, args []string) error {
 	if *parallel <= 0 || *parallel >= 64 {
 		*parallel = 4
 	}
-	mr, err := MultiReader(cmd.Flag.Args())
+	mr, err := multireader.New(cmd.Flag.Args())
 	if err != nil {
 		return err
 	}
@@ -474,12 +475,12 @@ func runReplay(cmd *cli.Command, args []string) error {
 		for i := 1; i < cmd.Flag.NArg(); i++ {
 			files[i-1] = cmd.Flag.Arg(i)
 		}
-		r, err = MultiReader(files)
+		r, err = multireader.New(files)
 	}
 	if err != nil {
 		return err
 	}
-	r = VCDUReader(r, *count)
+	r = erdle.VCDUReader(r, *count)
 	if *inspect {
 		pr, pw := io.Pipe()
 		defer pw.Close()
@@ -523,7 +524,7 @@ func runCount(cmd *cli.Command, args []string) error {
 		r, err = PCAPReader(cmd.Flag.Arg(0), *filter)
 		*count = 0
 	} else {
-		r, err = MultiReader(cmd.Flag.Args())
+		r, err = multireader.New(cmd.Flag.Args())
 	}
 	if err != nil {
 		return err
@@ -532,7 +533,7 @@ func runCount(cmd *cli.Command, args []string) error {
 	case "", "hrdl":
 		return countHRDL(HRDLReader(r, *count), strings.ToLower(*by))
 	case "cadu":
-		return countCadus(VCDUReader(r, *count))
+		return countCadus(erdle.VCDUReader(r, *count))
 	default:
 		return fmt.Errorf("unknown packet type %s", *kind)
 	}
@@ -554,7 +555,7 @@ func runList(cmd *cli.Command, args []string) error {
 		r, err = PCAPReader(cmd.Flag.Arg(0), *filter)
 		*count = 0
 	} else {
-		r, err = MultiReader(cmd.Flag.Args())
+		r, err = multireader.New(cmd.Flag.Args())
 	}
 	if err != nil {
 		return err
@@ -821,7 +822,7 @@ func reassemble(addr string, n, b int) (<-chan []byte, error) {
 			close(q)
 		}()
 		var buffer, rest []byte
-		r := CaduReader(r, 0)
+		r := erdle.CaduReader(r, 0)
 		for {
 			buffer, rest, err = nextPacket(r, rest)
 			if err == nil {
@@ -872,7 +873,7 @@ func readPackets(addr string, n, b int) (<-chan []byte, error) {
 			c.Close()
 			close(q)
 		}()
-		r := VCDUReader(r, 0)
+		r := erdle.VCDUReader(r, 0)
 		for {
 			body := make([]byte, 1024)
 			n, err := r.Read(body)
