@@ -12,6 +12,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/busoc/erdle"
 	"github.com/busoc/timutil"
 	"github.com/juju/ratelimit"
 	"github.com/midbel/ringbuffer"
@@ -75,9 +76,9 @@ func indexPackets(r io.Reader, by string) error {
 			break
 		}
 		if err != nil {
-			if n, ok := IsMissingCadu(err); ok {
+			if n, ok := erdle.IsMissingCadu(err); ok {
 				missing += n
-			} else if IsCRCError(err) {
+			} else if erdle.IsCRCError(err) {
 
 			} else {
 				return err
@@ -169,9 +170,9 @@ func inspectCadus(rs io.Reader, skip int) error {
 					offset = offset + ix + WordLen
 				}
 			}
-		} else if IsCRCError(err) {
+		} else if erdle.IsCRCError(err) {
 			invalid++
-		} else if n, ok := IsMissingCadu(err); ok {
+		} else if n, ok := erdle.IsMissingCadu(err); ok {
 			missing += uint64(n)
 		} else {
 			return err

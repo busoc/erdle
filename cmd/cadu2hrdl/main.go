@@ -835,11 +835,11 @@ func reassemble(addr string, n, b int) (<-chan []byte, error) {
 					dropped += 1
 					size += int64(len(buffer))
 				}
-			} else if n, ok := IsMissingCadu(err); ok {
+			} else if n, ok := erdle.IsMissingCadu(err); ok {
 				errMissing += int64(n)
 				size += int64(len(buffer))
 				skipped++
-			} else if IsCRCError(err) {
+			} else if erdle.IsCRCError(err) {
 				errCRC += int64(n)
 				size += int64(len(buffer))
 				skipped++
@@ -880,7 +880,7 @@ func readPackets(addr string, n, b int) (<-chan []byte, error) {
 				continue
 			}
 			if err != nil {
-				if IsCaduError(err) {
+				if erdle.IsCaduError(err) {
 					continue
 				} else {
 					return

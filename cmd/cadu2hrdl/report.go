@@ -34,11 +34,11 @@ func countCadus(r io.Reader) error {
 		if err == io.EOF {
 			break
 		}
-		if n, ok := IsMissingCadu(err); ok {
+		if n, ok := erdle.IsMissingCadu(err); ok {
 			z.Missing += uint32(n)
 			continue
 		}
-		if IsCRCError(err) {
+		if erdle.IsCRCError(err) {
 			z.Invalid++
 			continue
 		}
@@ -73,7 +73,7 @@ func countHRDL(r io.Reader, by string) error {
 			if err == io.EOF {
 				break
 			}
-			if _, ok := IsMissingCadu(err); ok {
+			if _, ok := erdle.IsMissingCadu(err); ok {
 				continue
 			}
 			return err
@@ -112,9 +112,9 @@ func listHRDL(r io.Reader, raw bool) error {
 			if err == io.EOF {
 				break
 			}
-			if n, ok := IsMissingCadu(err); ok {
+			if n, ok := erdle.IsMissingCadu(err); ok {
 				errMissing += n
-			} else if IsCRCError(err) {
+			} else if erdle.IsCRCError(err) {
 				errCRC++
 			} else {
 				return err

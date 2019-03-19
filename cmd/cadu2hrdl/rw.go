@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -12,39 +11,6 @@ import (
 
 	"github.com/busoc/erdle"
 )
-
-var ErrMagic = errors.New("cadu: invalid magic")
-
-type MissingCaduError struct {
-	From, To uint32
-}
-
-func (e MissingCaduError) Error() string {
-	return fmt.Sprintf("%d missing cadus (%d - %d)", ((e.To-e.From)&0xFFFFFF)-1, e.From, e.To)
-}
-
-type CRCError struct {
-	Want, Got uint16
-}
-
-func (c CRCError) Error() string {
-	return fmt.Sprintf("invalid crc: want %04x, got %04x", c.Want, c.Got)
-}
-
-func IsMissingCadu(err error) (int, bool) {
-	e, ok := err.(MissingCaduError)
-	return int((e.To - e.From) & 0xFFFFFF), ok
-}
-
-func IsCRCError(err error) bool {
-	_, ok := err.(CRCError)
-	return ok
-}
-
-func IsCaduError(err error) bool {
-	_, ok := IsMissingCadu(err)
-	return ok || IsCRCError(err)
-}
 
 type multiReader struct {
 	file  *os.File
@@ -139,23 +105,23 @@ func (r *vcduReader) Read(bs []byte) (int, error) {
 		return r.Read(bs)
 	}
 	if !bytes.HasPrefix(xs[r.skip:], Magic) {
-		return 0, ErrMagic
+		return 0, erdle.ErrMagic
 	}
 	if s := r.digest.Sum(xs[r.skip+4 : r.skip+CaduTrailerIndex]); !bytes.Equal(s[2:], xs[r.skip+CaduTrailerIndex:r.skip+CaduLen]) {
 		w := binary.BigEndian.Uint16(xs[r.skip+CaduTrailerIndex:])
 		g := binary.BigEndian.Uint16(s[2:])
-		err = CRCError{Want: w, Got: g}
+		err = erdle.CRCError{Want: w, Got: g}
 	}
 
 	curr := binary.BigEndian.Uint32(xs[r.skip+6:]) >> 8
 	if curr < r.counter {
 		if err == nil {
-			err = MissingCaduError{From: curr, To: r.counter}
+			err = erdle.MissingCaduError{From: curr, To: r.counter}
 		}
 	}
 	if diff := (curr - r.counter) & CaduCounterMask; diff != curr && diff > 1 {
 		if err == nil {
-			err = MissingCaduError{From: r.counter, To: curr}
+			err = erdle.MissingCaduError{From: r.counter, To: curr}
 		}
 	}
 	r.counter = curr
