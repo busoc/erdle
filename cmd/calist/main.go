@@ -33,12 +33,12 @@ func (z *Coze) Update(c *Coze) {
 }
 
 func main() {
-	defer func() {
-		if err := recover(); err != nil {
-			fmt.Fprintf(os.Stderr, "unexpected error: %s\n", err)
-			os.Exit(3)
-		}
-	}()
+	// defer func() {
+	// 	if err := recover(); err != nil {
+	// 		fmt.Fprintf(os.Stderr, "unexpected error: %s\n", err)
+	// 		os.Exit(3)
+	// 	}
+	// }()
 	list := flag.Bool("l", false, "show cadus list")
 	diff := flag.Bool("g", false, "show cadus gaps")
 	flag.Parse()
@@ -79,8 +79,12 @@ func listCadus(h *pcap.Handle, c *Coze, list, gap bool) error {
 		if err != nil {
 			break
 		}
+		layer := p.ApplicationLayer()
+		if layer == nil {
+			continue
+		}
 
-		xs := p.ApplicationLayer().Payload()
+		xs := layer.Payload()
 		if !bytes.HasPrefix(xs, erdle.Magic) {
 			continue
 		}
