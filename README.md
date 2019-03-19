@@ -209,7 +209,8 @@ concatenate them to form a larger "predictable" set of VCDU packets for, eg, lat
 replay sessions.
 
 the ``calist`` command is usefull to troubleshoot a stream of VCDU captured with
-a ``tcpdump``
+a ``tcpdump`` directly on the server where the capture has been made without having
+to copy this to another server/workstation that has a, eg, wireshark (GUI) installed
 
 ```
 $ calist -l /tmp/capture.pcap
