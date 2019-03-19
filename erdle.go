@@ -13,7 +13,10 @@ var (
 	Magic = []byte{0x1a, 0xcf, 0xfc, 0x1d}
 )
 
-const WordLen = 4
+const (
+	WordLen  = 4
+	MagicLen = 4
+)
 
 const (
 	CaduBodyLen      = 1008

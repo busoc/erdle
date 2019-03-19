@@ -329,7 +329,7 @@ func (c *chunker) Read(bs []byte) (int, error) {
 			}
 			return 0, err
 		}
-		c.buffer.Write(StuffBytes(c.scanner.Bytes()))
+		c.buffer.Write(erdle.StuffBytes(c.scanner.Bytes()))
 	}
 	var b bytes.Buffer
 	b.Write(Magic)
@@ -691,7 +691,7 @@ func validate(queue <-chan []byte, n int, keep, strip bool) <-chan []byte {
 			offset = 2 * WordLen
 		}
 		for bs := range queue {
-			n, xs := Unstuff(bs)
+			n, xs := erdle.Unstuff(bs)
 			z := int(binary.LittleEndian.Uint32(xs[4:])) + 12
 			if n < offset || len(xs) < z || len(xs) < 12 {
 				errLength++
