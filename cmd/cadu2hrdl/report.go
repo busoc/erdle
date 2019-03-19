@@ -2,13 +2,13 @@ package main
 
 import (
 	"bytes"
-	"crypto/md5"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
 	"time"
 
+	"github.com/midbel/xxh"
 	"github.com/busoc/erdle"
 	"github.com/busoc/timutil"
 )
@@ -208,7 +208,7 @@ func dumpErdle(i int, r *bytes.Reader) error {
 		rest -= len(bs)
 	}
 	var err error
-	md := md5.New()
+	md := xxh.New64(0)
 	if _, err = io.CopyN(md, rw, int64(rest)); err != nil {
 		return ErrLength
 	}
