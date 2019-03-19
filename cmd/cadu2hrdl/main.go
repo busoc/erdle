@@ -17,6 +17,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/busoc/erdle"
 	"github.com/busoc/erdle/cmd/internal/roll"
 	"github.com/midbel/cli"
 	"github.com/midbel/ringbuffer"
@@ -301,7 +302,7 @@ func OpenRT(file string) (io.ReadCloser, error) {
 	c := chunker{
 		Closer:  r,
 		scanner: s,
-		digest:  SumVCDU(),
+		digest:  erdle.SumVCDU(),
 	}
 	return &c, nil
 }

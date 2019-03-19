@@ -9,6 +9,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/busoc/erdle"
 	"github.com/busoc/timutil"
 )
 
@@ -84,7 +85,7 @@ func countHRDL(r io.Reader, by string) error {
 		}
 		if z := binary.LittleEndian.Uint32(body[4:]) + 12; int(z) != n {
 			zs[i].Invalid++
-		} else if s := SumHRD(body[8 : n-4]); s != binary.LittleEndian.Uint32(body[n-4:]) {
+		} else if s := erdle.SumHRD(body[8 : n-4]); s != binary.LittleEndian.Uint32(body[n-4:]) {
 			zs[i].Invalid++
 		}
 
@@ -159,7 +160,7 @@ func dumpErdle(i int, r *bytes.Reader) error {
 	binary.Read(r, binary.LittleEndian, &sync)
 	binary.Read(r, binary.LittleEndian, &size)
 
-	digest := SumHRDL()
+	digest := erdle.SumHRDL()
 	rw := io.TeeReader(r, digest)
 	binary.Read(rw, binary.LittleEndian, &channel)
 	binary.Read(rw, binary.LittleEndian, &source)

@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"sort"
+
+	"github.com/busoc/erdle"
 )
 
 var ErrMagic = errors.New("cadu: invalid magic")
@@ -104,7 +106,7 @@ func CaduReader(r io.Reader, skip int) io.Reader {
 		skip:   skip,
 		inner:  r,
 		body:   true,
-		digest: SumVCDU(),
+		digest: erdle.SumVCDU(),
 	}
 }
 
@@ -112,7 +114,7 @@ func VCDUReader(r io.Reader, skip int) io.Reader {
 	return &vcduReader{
 		skip:   skip,
 		inner:  r,
-		digest: SumVCDU(),
+		digest: erdle.SumVCDU(),
 	}
 }
 
