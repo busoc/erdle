@@ -197,3 +197,16 @@ needed to reassembled.
 the ``list`` command prints for each HRDL packets reassembled some of their headers and if they are not corrupted according to the HRDL checksum.
 
 the ``count`` command gives the number of VCDU or HRDL packets found in a dataset.
+
+# additional standalone commands
+
+in addition to providing the ``erdle`` command (and its set of own commands), the
+erdle package provides also additional standalone commands that allow to manipulate
+VCDU packets but in different ways.
+
+the ``cacat`` command allows to take a set of files containing VCDU packets and
+concatenate them to form a larger "predictable" set of VCDU packets for, eg, later
+replay sessions.
+
+the ``calist`` command is usefull to troubleshoot a stream of VCDU captured with
+a ``tcpdump``
