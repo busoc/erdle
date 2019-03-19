@@ -48,13 +48,15 @@ VCDU and a destination that is only expecting a stream of HRDL packets.
 The role of this command will then be to reassemble HRDL packets from incoming
 VCDU packets and then send all complete HRDL packets (valid or not - depending
 of the configuration) to the destination. However, reassembling of one HRDL packet
-can be aborted two circumstances:
+can be aborted when one of the following condition is met:
 
 * missing VCDU and/or unordered VCDU packets
 * invalid VCDU CRC
 
-In this two cases, ``relay`` stops the reassembling of the current packet and
-starts to search for the synchronization word of the next HRDL packet.
+If one of these conditions is met, only the current HRDL buffer is discarded by
+the ``relay``. After having discarded the current buffer, it starts to search for
+the synchronization word of the next HRDL packet.
+
 
 The following options can be given to the ``relay`` command:
 
@@ -158,3 +160,40 @@ maxcount  = 0 # only timeout or interval rotation
 ```
 
 Note that configured options will overwrite options given on the command line.
+
+# erdle inspect, index, list, count
+
+this group of commands can be used to get various information about the status
+of a dataset of VCDU and how HRDL packets will or has been received from a
+dataset.
+
+the ``inspect`` command can give the number of HRDL packets (and their total size)
+that will be reassembled at a specific transmission rate and some stats about the
+VCDU packets used to reassembled the HRDL packets (missing cadus, fillers,...).
+
+```
+4096 cadus (4032KB), 0 missing, 0 invalid, 0 filler, 75 packets (avg:   53KB, sum:   4020KB)
+4096 cadus (4032KB), 0 missing, 0 invalid, 0 filler, 76 packets (avg:   53KB, sum:   4034KB)
+4096 cadus (4032KB), 0 missing, 0 invalid, 0 filler, 76 packets (avg:   52KB, sum:   4024KB)
+4096 cadus (4026KB), 0 missing, 0 invalid, 6 filler, 75 packets (avg:   53KB, sum:   4016KB)
+4096 cadus (4026KB), 0 missing, 0 invalid, 6 filler, 78 packets (avg:   51KB, sum:   3998KB)
+```
+
+the ``index`` command creates a link between each HRDL packets and the VCDU packets
+needed to reassembled.
+
+```
+763 ||  9.92966208s | 40672 |   3558573 | 0 || 14152 | 03 |  3904246 | 2018-09-27 17:25:29.012
+764 ||  9.93308004s | 40686 |   3558587 | 0 || 70892 | 03 |  3904247 | 2018-09-27 17:25:29.012
+765 ||  9.95016984s | 40756 |   3558657 | 0 || 78734 | 03 |  3904248 | 2018-09-27 17:25:29.013
+766 ||  9.96921276s | 40834 |   3558735 | 0 || 14152 | 03 |  3904249 | 2018-09-27 17:25:29.013
+767 ||  9.97263072s | 40848 |   3558749 | 0 || 78712 | 03 |  3904250 | 2018-09-27 17:25:29.013
+768 ||  9.99167364s | 40926 |   3558827 | 0 || 70848 | 03 |  3904251 | 2018-09-27 17:25:29.013
+769 || 10.00900758s | 40997 |   3558898 | 0 || 14152 | 03 |  3904252 | 2018-09-27 17:25:29.014
+770 || 10.01242554s | 41011 |   3558912 | 0 || 70870 | 03 |  3904253 | 2018-09-27 17:25:29.014
+771 || 10.02951534s | 41081 |   3558982 | 0 || 78712 | 03 |  3904254 | 2018-09-27 17:25:29.014
+```
+
+the ``list`` command prints for each HRDL packets reassembled some of their headers and if they are not corrupted according to the HRDL checksum.
+
+the ``count`` command gives the number of VCDU or HRDL packets found in a dataset.
