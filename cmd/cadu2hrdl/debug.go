@@ -29,7 +29,7 @@ func byOrigin(bs []byte) (byte, uint32) {
 func indexPackets(r io.Reader, by string) error {
 	var byFunc func(bs []byte) (byte, uint32, time.Time)
 
-	hdrLen := WordLen + VMULen
+	hdrLen := erdle.WordLen + VMULen
 	switch by {
 	case "mix":
 		byFunc = func(bs []byte) (byte, uint32, time.Time) {
@@ -93,19 +93,19 @@ func indexPackets(r io.Reader, by string) error {
 		buffer = append(buffer, body[14:1022]...)
 		var offset int
 		for i := 1; offset < len(buffer); i++ {
-			if ix := bytes.Index(buffer[offset:], Word); ix < 0 {
+			if ix := bytes.Index(buffer[offset:], erdle.Word); ix < 0 {
 				break
 			} else {
-				cut := offset + ix + WordLen
+				cut := offset + ix + erdle.WordLen
 				if len(buffer[cut:]) >= hdrLen {
 					pid++
 					size := uint64(binary.LittleEndian.Uint32(buffer[cut:]))
 
-					id, seq, w := byFunc(buffer[cut+WordLen:])
+					id, seq, w := byFunc(buffer[cut+erdle.WordLen:])
 					when := w.Format("2006-01-02 15:04:05.000")
 					log.Printf("%9d || %16s | %9d | %9d | %9d || %8d | %02x | %8d | %s", pid, elapsed, j, cid, missing, size, id, seq, when)
 
-					offset = cut + WordLen + VMULen
+					offset = cut + erdle.WordLen + VMULen
 					missing = 0
 				} else {
 					break
@@ -149,25 +149,25 @@ func inspectCadus(rs io.Reader, skip int) error {
 				continue
 			}
 			var offset int
-			if bytes.HasPrefix(body, Word) {
+			if bytes.HasPrefix(body, erdle.Word) {
 				buffer = buffer[:0]
-				offset += WordLen
+				offset += erdle.WordLen
 				prefix++
 				hrdl++
 
-				average += uint64(binary.LittleEndian.Uint32(body[WordLen:]))
+				average += uint64(binary.LittleEndian.Uint32(body[erdle.WordLen:]))
 			}
 			buffer = append(buffer, body...)
 			for offset < len(buffer) {
-				if ix := bytes.Index(buffer[offset:], Word); ix < 0 {
+				if ix := bytes.Index(buffer[offset:], erdle.Word); ix < 0 {
 					buffer = buffer[offset:]
 					break
 				} else {
 					hrdl++
 					if len(buffer[offset+ix:]) >= 8 {
-						average += uint64(binary.LittleEndian.Uint32(buffer[offset+ix+WordLen:]))
+						average += uint64(binary.LittleEndian.Uint32(buffer[offset+ix+erdle.WordLen:]))
 					}
-					offset = offset + ix + WordLen
+					offset = offset + ix + erdle.WordLen
 				}
 			}
 		} else if erdle.IsCRCError(err) {
@@ -263,7 +263,7 @@ func traceCadus(addr string) error {
 		switch {
 		case n < len(body):
 			errSize++
-		case !bytes.Equal(body[:4], Magic):
+		case !bytes.Equal(body[:4], erdle.Magic):
 			errMagic++
 		}
 		curr := binary.BigEndian.Uint32(body[6:]) >> 8

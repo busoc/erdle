@@ -32,19 +32,10 @@ var (
 	ErrLength  = errors.New("hrdl: invalid length")
 )
 
-var (
-	Word  = []byte{0xf8, 0x2e, 0x35, 0x53}
-	Stuff = []byte{0xf8, 0x2e, 0x35, 0xaa}
-	Magic = []byte{0x1a, 0xcf, 0xfc, 0x1d}
-)
-
 const (
-	WordLen = 4
-	VMULen  = 16
-	HDRLen  = 24
+	VMULen = 16
+	HDRLen = 24
 )
-
-const VCDUSize = 1024
 
 const (
 	hdkInstance = 0
@@ -261,7 +252,7 @@ func runSplit(cmd *cli.Command, args []string) error {
 	}
 	defer w.Close()
 
-	body := make([]byte, VCDUSize)
+	body := make([]byte, erdle.CaduLen)
 	for _, p := range cmd.Flag.Args() {
 		r, err := OpenRT(p)
 		if err != nil {
@@ -332,23 +323,23 @@ func (c *chunker) Read(bs []byte) (int, error) {
 		c.buffer.Write(erdle.StuffBytes(c.scanner.Bytes()))
 	}
 	var b bytes.Buffer
-	b.Write(Magic)
+	b.Write(erdle.Magic)
 
 	w := io.MultiWriter(&b, c.digest)
 
 	binary.Write(w, binary.BigEndian, uint16(0x45c7))
 	binary.Write(w, binary.BigEndian, c.counter<<8)
 	binary.Write(w, binary.BigEndian, uint32(0xfdc33fff))
-	if n, _ := io.CopyN(w, &c.buffer, 1008); n < 1008 {
-		w.Write(make([]byte, 1008-n))
+	if n, _ := io.CopyN(w, &c.buffer, erdle.CaduBodyLen); n < erdle.CaduBodyLen {
+		w.Write(make([]byte, erdle.CaduBodyLen-n))
 	}
 	binary.Write(&b, binary.BigEndian, uint16(c.digest.Sum32()))
 
 	c.counter++
-	if c.counter > 0xFFFFFF {
+	if c.counter > erdle.CaduCounterMax {
 		c.counter = 0
 	}
-	return io.ReadAtLeast(&b, bs, 1024)
+	return io.ReadAtLeast(&b, bs, erdle.CaduLen)
 }
 
 func runInspect(cmd *cli.Command, args []string) error {
@@ -368,7 +359,7 @@ func runInspect(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	fill := VCDUSize + *count
+	fill := erdle.CaduLen + *count
 
 	var grp errgroup.Group
 	sema := make(chan struct{}, *parallel)
@@ -688,7 +679,7 @@ func validate(queue <-chan []byte, n int, keep, strip bool) <-chan []byte {
 
 		var offset int
 		if strip {
-			offset = 2 * WordLen
+			offset = 2 * erdle.WordLen
 		}
 		for bs := range queue {
 			n, xs := erdle.Unstuff(bs)
@@ -751,7 +742,7 @@ func reassemble(addr string, n, b int) (<-chan []byte, error) {
 	if b > 0 {
 		rw := ringbuffer.NewRingSize(b, 0)
 		go func(r io.Reader) {
-			io.CopyBuffer(rw, r, make([]byte, 1024))
+			io.CopyBuffer(rw, r, make([]byte, erdle.CaduLen))
 		}(r)
 		r = rw
 	}
@@ -825,7 +816,7 @@ func readPackets(addr string, n, b int) (<-chan []byte, error) {
 	if b > 0 {
 		rw := ringbuffer.NewRingSize(b, 0)
 		go func(r io.Reader) {
-			io.CopyBuffer(rw, r, make([]byte, 1024))
+			io.CopyBuffer(rw, r, make([]byte, erdle.CaduLen))
 		}(r)
 		r = rw
 	}
@@ -836,7 +827,7 @@ func readPackets(addr string, n, b int) (<-chan []byte, error) {
 		}()
 		r := erdle.VCDUReader(r, 0)
 		for {
-			body := make([]byte, 1024)
+			body := make([]byte, erdle.CaduLen)
 			n, err := r.Read(body)
 			if n < len(body) {
 				continue

@@ -25,6 +25,7 @@ const (
 	CaduTrailerLen   = 2
 	CaduTrailerIndex = CaduHeaderLen + CaduBodyLen
 	CaduCounterMask  = 0xFFFFFF
+	CaduCounterMax   = CaduCounterMask
 )
 
 func StuffBytes(bs []byte) []byte {

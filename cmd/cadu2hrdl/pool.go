@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 
+	"github.com/busoc/erdle"
 	"github.com/juju/ratelimit"
 	"github.com/midbel/rustine/sum"
 )
@@ -118,7 +119,7 @@ func (c *conn) Write(bs []byte) (int, error) {
 func writeHRDL(c *conn, bs []byte) (int, error) {
 	var buf bytes.Buffer
 
-	buf.Write(Word)
+	buf.Write(erdle.Word)
 	binary.Write(&buf, binary.LittleEndian, uint32(len(bs))-4)
 	buf.Write(bs)
 
@@ -129,7 +130,7 @@ func writeHRDL(c *conn, bs []byte) (int, error) {
 func writeHadock(c *conn, bs []byte) (int, error) {
 	var buf bytes.Buffer
 
-	buf.Write(Word)
+	buf.Write(erdle.Word)
 	binary.Write(&buf, binary.BigEndian, c.preamble)
 	binary.Write(&buf, binary.BigEndian, c.next)
 	binary.Write(&buf, binary.BigEndian, uint32(len(bs)))

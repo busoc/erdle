@@ -120,36 +120,36 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 			return nil, nil, err
 		}
 		buffer = append(buffer, block[:n]...)
-		if bytes.Equal(buffer[:WordLen], Word) {
+		if bytes.Equal(buffer[:erdle.WordLen], erdle.Word) {
 			break
 		}
-		if len(buffer[offset:]) > WordLen {
-			if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {
+		if len(buffer[offset:]) > erdle.WordLen {
+			if ix := bytes.Index(buffer[offset:], erdle.Word); ix >= 0 {
 				buffer = buffer[offset+ix:]
 				break
 			}
 		}
-		offset += n - WordLen
+		offset += n - erdle.WordLen
 	}
-	offset = WordLen
+	offset = erdle.WordLen
 	for {
 		n, err := r.Read(block)
 		if err != nil {
 			// verify the length of the buffer
 			// we've maybe a full HRDL packet and the loss of cadu happens when, at least, one filler has been received
 			// if we've enough bytes, we know that we've a full "valid" HRDL packet
-			if z := binary.LittleEndian.Uint32(buffer[WordLen:]) + 12; len(buffer) >= int(z) {
+			if z := binary.LittleEndian.Uint32(buffer[erdle.WordLen:]) + 12; len(buffer) >= int(z) {
 				return buffer, nil, nil
 			} else {
 				return nil, nil, err
 			}
 		}
 		buffer = append(buffer, block[:n]...)
-		if ix := bytes.Index(buffer[offset:], Word); ix >= 0 {
+		if ix := bytes.Index(buffer[offset:], erdle.Word); ix >= 0 {
 			buffer, rest = buffer[:offset+ix], buffer[offset+ix:]
 			break
 		}
-		offset += n - WordLen
+		offset += n - erdle.WordLen
 	}
 	return buffer, rest, nil
 }
