@@ -73,7 +73,7 @@ func (h *hrdfe) Open(n int, w time.Time) (io.WriteCloser, error) {
 				return
 			}
 			if i.Size() == 0 {
-				os.Remove(file)
+				os.Remove(f)
 			}
 		}(h.filename)
 	}
