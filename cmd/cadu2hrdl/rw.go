@@ -8,31 +8,6 @@ import (
 	"github.com/busoc/erdle"
 )
 
-// type vcduReader struct {
-// 	skip    int
-// 	inner   io.Reader
-// 	counter uint32
-// 	body    bool
-// 	digest  hash.Hash32
-// }
-//
-// func CaduReader(r io.Reader, skip int) io.Reader {
-// 	return &vcduReader{
-// 		skip:   skip,
-// 		inner:  r,
-// 		body:   true,
-// 		digest: erdle.SumVCDU(),
-// 	}
-// }
-//
-// func VCDUReader(r io.Reader, skip int) io.Reader {
-// 	return &vcduReader{
-// 		skip:   skip,
-// 		inner:  r,
-// 		digest: erdle.SumVCDU(),
-// 	}
-// }
-
 const (
 	CaduBodyLen      = 1008
 	CaduLen          = 1024
@@ -42,45 +17,6 @@ const (
 	CaduCounterMask  = 0xFFFFFF
 )
 
-// func (r *vcduReader) Read(bs []byte) (int, error) {
-// 	defer r.digest.Reset()
-// 	xs := make([]byte, r.skip+CaduLen)
-// 	// n, err := r.inner.Read(xs)
-// 	n, err := io.ReadFull(r.inner, xs)
-// 	if err != nil {
-// 		return n, err
-// 	}
-// 	if n == 0 {
-// 		return r.Read(bs)
-// 	}
-// 	if !bytes.HasPrefix(xs[r.skip:], Magic) {
-// 		return 0, erdle.ErrMagic
-// 	}
-// 	if s := r.digest.Sum(xs[r.skip+4 : r.skip+CaduTrailerIndex]); !bytes.Equal(s[2:], xs[r.skip+CaduTrailerIndex:r.skip+CaduLen]) {
-// 		w := binary.BigEndian.Uint16(xs[r.skip+CaduTrailerIndex:])
-// 		g := binary.BigEndian.Uint16(s[2:])
-// 		err = erdle.CRCError{Want: w, Got: g}
-// 	}
-//
-// 	curr := binary.BigEndian.Uint32(xs[r.skip+6:]) >> 8
-// 	if curr < r.counter {
-// 		if err == nil {
-// 			err = erdle.MissingCaduError{From: curr, To: r.counter}
-// 		}
-// 	}
-// 	if diff := (curr - r.counter) & CaduCounterMask; diff != curr && diff > 1 {
-// 		if err == nil {
-// 			err = erdle.MissingCaduError{From: r.counter, To: curr}
-// 		}
-// 	}
-// 	r.counter = curr
-// 	if r.body {
-// 		n = copy(bs, xs[r.skip+CaduHeaderLen:r.skip+CaduTrailerIndex])
-// 	} else {
-// 		n = copy(bs, xs[r.skip:])
-// 	}
-// 	return n, err
-// }
 
 type hrdlReader struct {
 	inner io.Reader
