@@ -17,7 +17,6 @@ const (
 	CaduCounterMask  = 0xFFFFFF
 )
 
-
 type hrdlReader struct {
 	inner io.Reader
 	rest  []byte

@@ -1,16 +1,13 @@
 package main
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
-	"time"
+	"os"
 
-	"github.com/midbel/xxh"
 	"github.com/busoc/erdle"
-	"github.com/busoc/timutil"
 	"github.com/busoc/vmu"
 )
 
@@ -103,8 +100,10 @@ func countHRDL(r io.Reader, by string) error {
 }
 
 func listHRDL(r io.Reader, raw bool) error {
-	body := make([]byte, 8<<20)
+	body := make([]byte, vmu.BufferSize)
 	var total, size, errCRC, errMissing, errInvalid, errLength int
+
+	d := vmu.Dump(os.Stdout, false)
 	for i := 1; ; i++ {
 		n, err := r.Read(body)
 
@@ -122,108 +121,14 @@ func listHRDL(r io.Reader, raw bool) error {
 			}
 		}
 		total++
-		if raw {
-			log.Printf("%6d | %x | %x | %x", i, body[:8], body[8:24], body[24:48])
-		} else {
-			if err := dumpErdle(i, bytes.NewReader(body[:n])); err != nil {
-				if err == ErrInvalid {
-					errInvalid++
-				} else if err == ErrLength {
-					errLength++
-				} else {
-					return err
-				}
+		if err := d.Dump(body[:n], true, raw); err != nil {
+			if err == vmu.ErrInvalid {
+				errInvalid++
+			} else {
+				errLength++
 			}
 		}
 	}
 	log.Printf("%d HRDL packets, %d invalid cks, %d invalid len (%d KB, %d missing cadus, %d corrupted)", total, errInvalid, errLength, size>>10, errMissing, errCRC)
 	return nil
-}
-
-func dumpErdle(i int, r *bytes.Reader) error {
-	var (
-		sync     uint32
-		size     uint32
-		spare    uint16
-		channel  uint8
-		source   uint8
-		origin   uint8
-		sequence uint32
-		coarse   uint32
-		fine     uint16
-		property uint8
-		stream   uint16
-		counter  uint32
-		cksum    uint32
-		acqtime  time.Duration
-		auxtime  time.Duration
-	)
-	binary.Read(r, binary.LittleEndian, &sync)
-	binary.Read(r, binary.LittleEndian, &size)
-
-	digest := vmu.SumHRDL()
-	rw := io.TeeReader(r, digest)
-	binary.Read(rw, binary.LittleEndian, &channel)
-	binary.Read(rw, binary.LittleEndian, &source)
-	binary.Read(rw, binary.LittleEndian, &spare)
-	binary.Read(rw, binary.LittleEndian, &sequence)
-	binary.Read(rw, binary.LittleEndian, &coarse)
-	binary.Read(rw, binary.LittleEndian, &fine)
-	binary.Read(rw, binary.LittleEndian, &spare)
-
-	vt := timutil.Join6(coarse, fine).Format("2006-01-02 15:04:05.000")
-
-	binary.Read(rw, binary.LittleEndian, &property)
-	binary.Read(rw, binary.LittleEndian, &stream)
-	binary.Read(rw, binary.LittleEndian, &counter)
-	binary.Read(rw, binary.LittleEndian, &acqtime)
-	binary.Read(rw, binary.LittleEndian, &auxtime)
-	binary.Read(rw, binary.LittleEndian, &origin)
-
-	at := timutil.GPS.Add(acqtime).Format("2006-01-02 15:04:05.000")
-
-	var mode string
-	rest := int(size) - (16 + 24) //16(VMU header length) + 24(HRD common header length)
-	if origin == source {
-		mode = "rt"
-	} else {
-		mode = "pb"
-	}
-	var upi string
-	switch channel {
-	case 3:
-		bs := make([]byte, 32)
-		if _, err := io.ReadFull(rw, bs); err == nil {
-			upi = string(bytes.Trim(bs, "\x00"))
-		} else {
-			upi = "SCIENCE"
-		}
-		rest -= len(bs)
-	case 1, 2:
-		bs := make([]byte, 52)
-		if _, err := io.ReadFull(rw, bs); err == nil {
-			upi = string(bytes.Trim(bs[20:], "\x00"))
-		} else {
-			upi = "IMAGE"
-		}
-		rest -= len(bs)
-	}
-	var err error
-	md := xxh.New64(0)
-	if _, err = io.CopyN(md, rw, int64(rest)); err != nil {
-		return ErrLength
-	}
-	sum := digest.Sum32()
-	if err = binary.Read(r, binary.LittleEndian, &cksum); err != nil {
-		return ErrLength
-	}
-
-	const row = "%7d | %8d || %02x | %8d | %s || %s | %02x | %8d | %s | %s || %08x | %s || %x"
-	valid := "ok"
-	if cksum != sum {
-		err = ErrInvalid
-		valid = "bad"
-	}
-	log.Printf(row, i, size, channel, sequence, vt, mode, origin, counter, at, upi, sum, valid, md.Sum(nil))
-	return err
 }
