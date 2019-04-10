@@ -19,8 +19,8 @@ import (
 
 	"github.com/busoc/erdle"
 	"github.com/busoc/erdle/cmd/internal/multireader"
-	"github.com/busoc/erdle/cmd/internal/roll"
 	"github.com/midbel/cli"
+	"github.com/midbel/roll"
 	"github.com/midbel/ringbuffer"
 	"github.com/midbel/toml"
 	"golang.org/x/sync/errgroup"
@@ -522,7 +522,12 @@ func runStore(cmd *cli.Command, args []string) error {
 		Config  bool         `toml:"-"`
 		Address string       `toml:"address"`
 		Dir     string       `toml:"datadir"`
-		Roll    roll.Options `toml:"storage"`
+		Roll    struct {
+			Interval time.Duration `toml:"interval"`
+			Timeout  time.Duration `toml:"timeout"`
+			MaxSize  int `toml:"maxsize"`
+			MaxCount int `toml:"maxcount"`
+		} `toml:"storage"`
 		Data    struct {
 			Payload uint `toml:"payload"`
 			Buffer  int  `toml:"buffer"`
@@ -562,7 +567,12 @@ func runStore(cmd *cli.Command, args []string) error {
 		prefix string
 		queue  <-chan []byte
 	)
-	hr, err := NewWriter(settings.Dir, settings.Roll, uint8(settings.Data.Payload))
+	options := []roll.Option{
+		roll.WithThreshold(settings.Roll.MaxSize, settings.Roll.MaxCount),
+		roll.WithTimeout(settings.Roll.Timeout),
+		roll.WithInterval(settings.Roll.Interval),
+	}
+	hr, err := NewWriter(settings.Dir, uint8(settings.Data.Payload), options)
 	if err != nil {
 		return err
 	}

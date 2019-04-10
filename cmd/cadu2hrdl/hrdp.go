@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/busoc/erdle/cmd/internal/roll"
+	"github.com/midbel/roll"
 	"github.com/busoc/timutil"
 )
 
@@ -18,11 +18,11 @@ type Writer interface {
 	Filename() string
 }
 
-func NewWriter(dir string, o roll.Options, payload uint8) (Writer, error) {
+func NewWriter(dir string, payload uint8, options []roll.Option) (Writer, error) {
 	if payload == 0 {
-		return NewHRDFE(dir, o)
+		return NewHRDFE(dir, options)
 	} else {
-		return NewHRDP(dir, payload, o)
+		return NewHRDP(dir, payload, options)
 	}
 }
 
@@ -33,7 +33,7 @@ type hrdfe struct {
 	io.WriteCloser
 }
 
-func NewHRDFE(dir string, o roll.Options) (Writer, error) {
+func NewHRDFE(dir string, options []roll.Option) (Writer, error) {
 	err := os.MkdirAll(dir, 0755)
 	if err != nil && !os.IsExist(err) {
 		return nil, err
@@ -41,10 +41,7 @@ func NewHRDFE(dir string, o roll.Options) (Writer, error) {
 	hr := hrdfe{
 		datadir: dir,
 	}
-
-	o.Open = hr.Open
-	hr.WriteCloser, err = roll.Roll(o)
-	if err != nil {
+	if hr.WriteCloser, err = roll.Roll(hr.Open, options...); err != nil {
 		return nil, err
 	}
 	return &hr, nil
@@ -54,7 +51,7 @@ func (h *hrdfe) Filename() string {
 	return h.filename
 }
 
-func (h *hrdfe) Open(n int, w time.Time) (io.WriteCloser, error) {
+func (h *hrdfe) Open(n int, w time.Time) (io.WriteCloser, []io.Closer, error) {
 	datadir := h.datadir
 
 	y := fmt.Sprintf("%04d", w.Year())
@@ -63,7 +60,7 @@ func (h *hrdfe) Open(n int, w time.Time) (io.WriteCloser, error) {
 
 	datadir = filepath.Join(datadir, y, d, r)
 	if err := os.MkdirAll(datadir, 0755); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	file := filepath.Join(datadir, fmt.Sprintf("rt_%06d_%s.dat", n, w.Format("150405")))
 	if file != h.filename {
@@ -78,7 +75,8 @@ func (h *hrdfe) Open(n int, w time.Time) (io.WriteCloser, error) {
 		}(h.filename)
 	}
 	h.filename = file
-	return os.OpenFile(h.filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	wc, err := os.OpenFile(h.filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	return wc, nil, err
 }
 
 func (h *hrdfe) Write(bs []byte) (int, error) {
@@ -103,7 +101,7 @@ type hrdp struct {
 	io.WriteCloser
 }
 
-func NewHRDP(dir string, payload uint8, o roll.Options) (Writer, error) {
+func NewHRDP(dir string, payload uint8, options []roll.Option) (Writer, error) {
 	err := os.MkdirAll(dir, 0755)
 	if err != nil && !os.IsExist(err) {
 		return nil, err
@@ -113,8 +111,7 @@ func NewHRDP(dir string, payload uint8, o roll.Options) (Writer, error) {
 		datadir: dir,
 	}
 
-	o.Open = hr.Open
-	hr.WriteCloser, err = roll.Roll(o)
+	hr.WriteCloser, err = roll.Roll(hr.Open, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +122,7 @@ func (h *hrdp) Filename() string {
 	return h.filename
 }
 
-func (h *hrdp) Open(n int, w time.Time) (io.WriteCloser, error) {
+func (h *hrdp) Open(n int, w time.Time) (io.WriteCloser, []io.Closer, error) {
 	datadir := h.datadir
 
 	y := fmt.Sprintf("%04d", w.Year())
@@ -134,7 +131,7 @@ func (h *hrdp) Open(n int, w time.Time) (io.WriteCloser, error) {
 
 	datadir = filepath.Join(datadir, y, d, r)
 	if err := os.MkdirAll(datadir, 0755); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	file := filepath.Join(datadir, fmt.Sprintf("rt_%06d_%s.dat", n, w.Format("150405")))
 	if file != h.filename {
@@ -144,12 +141,13 @@ func (h *hrdp) Open(n int, w time.Time) (io.WriteCloser, error) {
 				return
 			}
 			if i.Size() == 0 {
-				os.Remove(file)
+				os.Remove(f)
 			}
 		}(h.filename)
 	}
 	h.filename = file
-	return os.OpenFile(h.filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	wc, err := os.OpenFile(h.filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	return wc, nil, err
 }
 
 func (h *hrdp) Write(bs []byte) (int, error) {
