@@ -20,8 +20,8 @@ import (
 	"github.com/busoc/erdle"
 	"github.com/busoc/erdle/cmd/internal/multireader"
 	"github.com/midbel/cli"
-	"github.com/midbel/roll"
 	"github.com/midbel/ringbuffer"
+	"github.com/midbel/roll"
 	"github.com/midbel/toml"
 	"golang.org/x/sync/errgroup"
 )
@@ -519,16 +519,16 @@ func runList(cmd *cli.Command, args []string) error {
 
 func runStore(cmd *cli.Command, args []string) error {
 	settings := struct {
-		Config  bool         `toml:"-"`
-		Address string       `toml:"address"`
-		Dir     string       `toml:"datadir"`
+		Config  bool   `toml:"-"`
+		Address string `toml:"address"`
+		Dir     string `toml:"datadir"`
 		Roll    struct {
 			Interval time.Duration `toml:"interval"`
 			Timeout  time.Duration `toml:"timeout"`
-			MaxSize  int `toml:"maxsize"`
-			MaxCount int `toml:"maxcount"`
+			MaxSize  int           `toml:"maxsize"`
+			MaxCount int           `toml:"maxcount"`
 		} `toml:"storage"`
-		Data    struct {
+		Data struct {
 			Payload uint `toml:"payload"`
 			Buffer  int  `toml:"buffer"`
 			Queue   int  `toml:"queue"`

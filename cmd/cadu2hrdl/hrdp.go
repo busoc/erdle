@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/midbel/roll"
 	"github.com/busoc/timutil"
+	"github.com/midbel/roll"
 )
 
 type Writer interface {
@@ -63,7 +63,7 @@ func (h *hrdfe) Open(n int, w time.Time) (io.WriteCloser, []io.Closer, error) {
 		return nil, nil, err
 	}
 	file := filepath.Join(datadir, fmt.Sprintf("rt_%06d_%s.dat", n, w.Format("150405")))
-	if file != h.filename {
+	if file != h.filename && h.filename != "" {
 		go func(f string) {
 			i, err := os.Stat(f)
 			if err != nil {
@@ -134,7 +134,7 @@ func (h *hrdp) Open(n int, w time.Time) (io.WriteCloser, []io.Closer, error) {
 		return nil, nil, err
 	}
 	file := filepath.Join(datadir, fmt.Sprintf("rt_%06d_%s.dat", n, w.Format("150405")))
-	if file != h.filename {
+	if file != h.filename && h.filename != "" {
 		go func(f string) {
 			i, err := os.Stat(f)
 			if err != nil {

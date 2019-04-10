@@ -1,0 +1,14 @@
+address = "udp://:10015"
+datadir   = "var/hrdp/vmu"
+
+[hrdl]
+payload = 2
+buffer = 67108864
+queue  = 1024
+keep   = false
+
+[storage]
+interval  = 300
+timeout   = 10
+maxsize  = 0
+maxcount = 0
