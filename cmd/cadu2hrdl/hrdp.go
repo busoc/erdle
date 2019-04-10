@@ -52,28 +52,13 @@ func (h *hrdfe) Filename() string {
 }
 
 func (h *hrdfe) Open(n int, w time.Time) (io.WriteCloser, []io.Closer, error) {
-	datadir := h.datadir
-
-	y := fmt.Sprintf("%04d", w.Year())
-	d := fmt.Sprintf("%03d", w.YearDay())
-	r := fmt.Sprintf("%02d", w.Hour())
-
-	datadir = filepath.Join(datadir, y, d, r)
-	if err := os.MkdirAll(datadir, 0755); err != nil {
+	datadir, err := mkdirAll(h.datadir, w)
+	if err != nil {
 		return nil, nil, err
 	}
 	file := filepath.Join(datadir, fmt.Sprintf("rt_%06d_%s.dat", n, w.Format("150405")))
-	if file != h.filename && h.filename != "" {
-		go func(f string) {
-			i, err := os.Stat(f)
-			if err != nil {
-				return
-			}
-			if i.Size() == 0 {
-				os.Remove(f)
-			}
-		}(h.filename)
-	}
+	go removeEmpty(file, h.filename)
+
 	h.filename = file
 	wc, err := os.OpenFile(h.filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	return wc, nil, err
@@ -123,28 +108,13 @@ func (h *hrdp) Filename() string {
 }
 
 func (h *hrdp) Open(n int, w time.Time) (io.WriteCloser, []io.Closer, error) {
-	datadir := h.datadir
-
-	y := fmt.Sprintf("%04d", w.Year())
-	d := fmt.Sprintf("%03d", w.YearDay())
-	r := fmt.Sprintf("%02d", w.Hour())
-
-	datadir = filepath.Join(datadir, y, d, r)
-	if err := os.MkdirAll(datadir, 0755); err != nil {
+	datadir, err := mkdirAll(h.datadir, w)
+	if err != nil {
 		return nil, nil, err
 	}
 	file := filepath.Join(datadir, fmt.Sprintf("rt_%06d_%s.dat", n, w.Format("150405")))
-	if file != h.filename && h.filename != "" {
-		go func(f string) {
-			i, err := os.Stat(f)
-			if err != nil {
-				return
-			}
-			if i.Size() == 0 {
-				os.Remove(f)
-			}
-		}(h.filename)
-	}
+	go removeEmpty(file, h.filename)
+
 	h.filename = file
 	wc, err := os.OpenFile(h.filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	return wc, nil, err
@@ -180,4 +150,26 @@ func (h *hrdp) Write(bs []byte) (int, error) {
 		return 0, err
 	}
 	return len(bs), nil
+}
+
+func mkdirAll(datadir string, w time.Time) (string, error) {
+	y := fmt.Sprintf("%04d", w.Year())
+	d := fmt.Sprintf("%03d", w.YearDay())
+	r := fmt.Sprintf("%02d", w.Hour())
+
+	datadir = filepath.Join(datadir, y, d, r)
+	return datadir, os.MkdirAll(datadir, 0755)
+}
+
+func removeEmpty(file, old string) {
+	if old == "" || old == file {
+		return
+	}
+	i, err := os.Stat(old)
+	if err != nil {
+		return
+	}
+	if i.Size() == 0 {
+		os.Remove(old)
+	}
 }
