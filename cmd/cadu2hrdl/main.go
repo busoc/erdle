@@ -73,7 +73,6 @@ options:
   -b BY      report count by origin or by channel if type is hrdl
   -c COUNT   skip COUNT bytes between each packets
   -t TYPE    specify the packet type (hrdl or cadu)
-  -k         keep invalid HRDL packets
 `,
 	},
 	{
