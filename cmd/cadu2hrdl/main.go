@@ -183,8 +183,8 @@ options:
 const Program = "c2h"
 
 func init() {
-	cli.BuildTime = "2019-02-04 12:45:00"
-	cli.Version = "0.1.1"
+	cli.BuildTime = "2019-08-01 07:00:00"
+	cli.Version = "0.1.0"
 }
 
 const helpText = `
