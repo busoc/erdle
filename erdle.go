@@ -52,6 +52,9 @@ func Unstuff(bs []byte) (int, []byte) {
 }
 
 func UnstuffBytes(src, dst []byte) int {
+	if len(src) <= 4 {
+		return 0
+	}
 	z, n := int(binary.LittleEndian.Uint32(src[4:]))+12, len(src)
 	if d := n - z; d > 0 && d%CaduBodyLen == 0 {
 		n -= d

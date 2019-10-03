@@ -20,14 +20,21 @@ const (
 type hrdlReader struct {
 	inner io.Reader
 	rest  []byte
+	keep  bool
 }
 
-func HRDLReader(r io.Reader, skip int) io.Reader {
-	return &hrdlReader{inner: erdle.CaduReader(r, skip)}
+func HRDLReader(r io.Reader, skip int, keep bool) io.Reader {
+	return &hrdlReader{
+		inner: erdle.CaduReader(r, skip),
+		keep:  keep,
+	}
 }
 
 func (r *hrdlReader) Read(bs []byte) (int, error) {
 	buffer, rest, err := nextPacket(r.inner, r.rest)
+	if r.keep && err != nil && err != io.EOF {
+		err = nil
+	}
 	r.rest = r.rest[:0]
 	switch err {
 	case nil:
@@ -74,7 +81,7 @@ func nextPacket(r io.Reader, rest []byte) ([]byte, []byte, error) {
 			// we've maybe a full HRDL packet and the loss of cadu happens when, at least, one filler has been received
 			// if we've enough bytes, we know that we've a full "valid" HRDL packet
 			if z := binary.LittleEndian.Uint32(buffer[erdle.WordLen:]) + 12; len(buffer) >= int(z) {
-				buffer, err = buffer[:z], nil
+				err = nil
 			}
 			return buffer, nil, err
 		}

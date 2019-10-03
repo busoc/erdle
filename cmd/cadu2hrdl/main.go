@@ -180,8 +180,8 @@ options:
 const Program = "c2h"
 
 func init() {
-	cli.BuildTime = "2019-08-01 07:00:00"
-	cli.Version = "0.1.0"
+	cli.BuildTime = "2019-10-02 08:00:00"
+	cli.Version = "0.1.1"
 }
 
 const helpText = `
@@ -466,6 +466,7 @@ func runReplay(cmd *cli.Command, args []string) error {
 func runCount(cmd *cli.Command, args []string) error {
 	by := cmd.Flag.String("b", "", "by")
 	kind := cmd.Flag.String("t", "", "packet type")
+	keep := cmd.Flag.Bool("k", false, "keep invalid")
 	count := cmd.Flag.Int("c", 0, "bytes to skip before each packets")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
@@ -477,7 +478,7 @@ func runCount(cmd *cli.Command, args []string) error {
 	}
 	switch strings.ToLower(*kind) {
 	case "", "hrdl":
-		return countHRDL(HRDLReader(r, *count), strings.ToLower(*by))
+		return countHRDL(HRDLReader(r, *count, *keep), strings.ToLower(*by))
 	case "cadu":
 		return countCadus(erdle.VCDUReader(r, *count))
 	default:
@@ -491,11 +492,12 @@ func runList(cmd *cli.Command, args []string) error {
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
+
 	r, err := multireader.New(cmd.Flag.Args())
 	if err != nil {
 		return err
 	}
-	return listHRDL(HRDLReader(r, *count), *keep)
+	return listHRDL(HRDLReader(r, *count, *keep), false)
 }
 
 func runStore(cmd *cli.Command, args []string) error {
@@ -677,12 +679,12 @@ func validate(queue <-chan []byte, n int, keep, strip bool) <-chan []byte {
 		for bs := range queue {
 			n, xs := erdle.Unstuff(bs)
 			z := int(binary.LittleEndian.Uint32(xs[4:])) + 12
+			if n < offset || len(xs) < z || len(xs) < 12 {
+				errLength++
+				continue
+			}
 			size += int64(z)
 			if keep {
-				if n < offset || len(xs) < z || len(xs) < 12 {
-					errLength++
-					continue
-				}
 				sum := binary.LittleEndian.Uint32(xs[z-4:])
 				var chk uint32
 				for i := 8; i < z-4; i++ {
