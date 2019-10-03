@@ -9,7 +9,6 @@ import (
 	"hash"
 	"io"
 	"log"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -405,7 +404,7 @@ func runRelay(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	queue, err := reassemble(settings.Local, settings.Queue, settings.Buffer)
+	queue, err := reassemble(settings.Local, settings.Queue, settings.Buffer, settings.Keep)
 	if err != nil {
 		return err
 	}
@@ -567,7 +566,7 @@ func runStore(cmd *cli.Command, args []string) error {
 		}
 	} else {
 		prefix = "[hrdp]"
-		q, err := reassemble(settings.Address, settings.Data.Queue, settings.Data.Buffer)
+		q, err := reassemble(settings.Address, settings.Data.Queue, settings.Data.Buffer, settings.Data.Keep)
 		if err != nil {
 			return err
 		}
@@ -605,18 +604,20 @@ func storePackets(hr Writer, queue <-chan []byte, prefix string) error {
 }
 
 func runDump(cmd *cli.Command, args []string) error {
-	q := cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
-	i := cmd.Flag.Int("i", -1, "hadock instance used")
-	b := cmd.Flag.Int("b", 64<<20, "buffer size")
-	k := cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
+	var (
+		size     = cmd.Flag.Int("q", 64, "queue size before dropping HRDL packets")
+		instance = cmd.Flag.Int("i", -1, "hadock instance used")
+		buffer   = cmd.Flag.Int("b", 64<<20, "buffer size")
+		keep     = cmd.Flag.Bool("k", false, "keep invalid HRDL packets (bad sum only)")
+	)
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
 	}
-	queue, err := reassemble(cmd.Flag.Arg(0), *q, *b)
+	queue, err := reassemble(cmd.Flag.Arg(0), *size, *buffer, *keep)
 	if err != nil {
 		return err
 	}
-	return dumpPackets(validate(queue, *q, *k, true), *i)
+	return dumpPackets(validate(queue, *size, *keep, true), *instance)
 }
 
 func runDebug(cmd *cli.Command, args []string) error {
@@ -676,12 +677,12 @@ func validate(queue <-chan []byte, n int, keep, strip bool) <-chan []byte {
 		for bs := range queue {
 			n, xs := erdle.Unstuff(bs)
 			z := int(binary.LittleEndian.Uint32(xs[4:])) + 12
-			if n < offset || len(xs) < z || len(xs) < 12 {
-				errLength++
-				continue
-			}
 			size += int64(z)
 			if keep {
+				if n < offset || len(xs) < z || len(xs) < 12 {
+					errLength++
+					continue
+				}
 				sum := binary.LittleEndian.Uint32(xs[z-4:])
 				var chk uint32
 				for i := 8; i < z-4; i++ {
@@ -703,36 +704,16 @@ func validate(queue <-chan []byte, n int, keep, strip bool) <-chan []byte {
 	return q
 }
 
-func listenUDP(addr string) (net.Conn, error) {
-	a, err := net.ResolveUDPAddr(protoFromAddr(addr))
-	if err != nil {
-		return nil, err
-	}
-	var c *net.UDPConn
-	if a.IP.IsMulticast() {
-		c, err = net.ListenMulticastUDP("udp", nil, a)
-	} else {
-		c, err = net.ListenUDP("udp", a)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := c.SetReadBuffer(16 << 20); err != nil {
-		return nil, err
-	}
-	return c, nil
-}
-
-func reassemble(addr string, n, b int) (<-chan []byte, error) {
+func reassemble(addr string, queue, buffer int, keep bool) (<-chan []byte, error) {
 	c, err := listenUDP(addr)
 	if err != nil {
 		return nil, err
 	}
-	q := make(chan []byte, n)
+	q := make(chan []byte, queue)
 
 	var r io.Reader = c
-	if b > 0 {
-		rw := ringbuffer.NewRingSize(b, 0)
+	if buffer > 0 {
+		rw := ringbuffer.NewRingSize(buffer, 0)
 		go func(r io.Reader) {
 			io.CopyBuffer(rw, r, make([]byte, erdle.CaduLen))
 		}(r)
@@ -769,6 +750,9 @@ func reassemble(addr string, n, b int) (<-chan []byte, error) {
 		r := erdle.CaduReader(r, 0)
 		for {
 			buffer, rest, err = nextPacket(r, rest)
+			if keep && err != nil {
+				err = nil
+			}
 			if err == nil {
 				if len(buffer) == 0 {
 					continue
