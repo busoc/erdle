@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
 	"os"
 
 	"github.com/busoc/erdle"
@@ -46,7 +45,8 @@ func countCadus(r io.Reader) error {
 		z.Count++
 		z.Size += n
 	}
-	log.Printf("%d cadus, missing: %d, invalid: %d (%dKB)", z.Count, z.Missing, z.Invalid, z.Size>>10)
+	fmt.Printf("%d cadus, missing: %d, invalid: %d (%dKB)", z.Count, z.Missing, z.Invalid, z.Size>>10)
+	fmt.Println()
 	return nil
 }
 
@@ -94,7 +94,8 @@ func countHRDL(r io.Reader, by string) error {
 		}
 	}
 	for i, e := range zs {
-		log.Printf("%02x: %7d packets, %7d missing, %4d invalid, %7dMB", i, e.Count, e.Missing, e.Invalid, e.Size>>20)
+		fmt.Printf("%02x: %7d packets, %7d missing, %4d invalid, %7dMB", i, e.Count, e.Missing, e.Invalid, e.Size>>20)
+		fmt.Println()
 	}
 	return nil
 }
@@ -129,6 +130,7 @@ func listHRDL(r io.Reader, raw bool) error {
 			}
 		}
 	}
-	log.Printf("%d HRDL packets, %d invalid cks, %d invalid len (%d KB, %d missing cadus, %d corrupted)", total, errInvalid, errLength, size>>10, errMissing, errCRC)
+	fmt.Printf("%d HRDL packets, %d invalid cks, %d invalid len (%d KB, %d missing cadus, %d corrupted)", total, errInvalid, errLength, size>>10, errMissing, errCRC)
+	fmt.Println()
 	return nil
 }
