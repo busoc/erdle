@@ -48,7 +48,9 @@ func (p *pool) Write(bs []byte) (int, error) {
 
 	n, err := c.Write(bs)
 	if err != nil {
-		c.Close()
+		if c, ok := c.(*net.UDPConn); !ok {
+			c.Close()
+		}
 	} else {
 		p.push(c)
 	}
