@@ -20,7 +20,7 @@ type pool struct {
 }
 
 func NewPool(a string, n, i, r int) (*pool, error) {
-	if n <= 1 {
+	if n < 1 {
 		return nil, fmt.Errorf("number of connections too small")
 	}
 	q := make(chan net.Conn, n)
