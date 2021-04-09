@@ -394,7 +394,7 @@ func runRelay(cmd *cli.Command, args []string) error {
 			return err
 		}
 		defer r.Close()
-		if err := toml.NewDecoder(r).Decode(&settings); err != nil {
+		if err := toml.Decode(r, &settings); err != nil {
 			return err
 		}
 	} else {
@@ -536,7 +536,7 @@ func runStore(cmd *cli.Command, args []string) error {
 			return err
 		}
 		defer r.Close()
-		if err := toml.NewDecoder(r).Decode(&settings); err != nil {
+		if err := toml.Decode(r, &settings); err != nil {
 			return err
 		}
 		settings.Roll.Interval = settings.Roll.Interval * time.Second
